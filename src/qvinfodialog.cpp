@@ -48,35 +48,52 @@ void QVInfoDialog::setInfo(const QFileInfo &value, const int &value2, const int 
         updateInfo();
 }
 
-void QVInfoDialog::updateInfo()
+QVFileInfoFields QVInfoDialog::buildFields(const QFileInfo &fileInfo, int width, int height,
+                                            int frameCount)
 {
     QLocale locale = QLocale::system();
     QMimeDatabase mimedb;
-    QMimeType mime = mimedb.mimeTypeForFile(selectedFileInfo.absoluteFilePath(),
-                                            QMimeDatabase::MatchContent);
+    QMimeType mime =
+            mimedb.mimeTypeForFile(fileInfo.absoluteFilePath(), QMimeDatabase::MatchContent);
     // this is just math to figure the megapixels and then round it to the tenths place
     const double megapixels =
             static_cast<double>(
                     qRound(((static_cast<double>((width * height)))) / 1000000 * 10 + 0.5))
             / 10;
 
-    ui->nameLabel->setText(selectedFileInfo.fileName());
-    ui->typeLabel->setText(mime.name());
-    ui->locationLabel->setText(selectedFileInfo.path());
-    ui->sizeLabel->setText(tr("%1 (%2 bytes)")
-                                   .arg(formatBytes(selectedFileInfo.size()),
-                                        locale.toString(selectedFileInfo.size())));
-    ui->modifiedLabel->setText(selectedFileInfo.lastModified().toString(locale.dateTimeFormat()));
-    ui->dimensionsLabel->setText(tr("%1 x %2 (%3 MP)")
-                                         .arg(QString::number(width), QString::number(height),
-                                              QString::number(megapixels)));
-    int gcd = getGcd(width, height);
+    QVFileInfoFields fields;
+    fields.name = fileInfo.fileName();
+    fields.type = mime.name();
+    fields.location = fileInfo.path();
+    fields.size = tr("%1 (%2 bytes)")
+                          .arg(formatBytes(fileInfo.size()), locale.toString(fileInfo.size()));
+    fields.modified = fileInfo.lastModified().toString(locale.dateTimeFormat());
+    fields.dimensions = tr("%1 x %2 (%3 MP)")
+                                .arg(QString::number(width), QString::number(height),
+                                     QString::number(megapixels));
+    const int gcd = getGcd(width, height);
     if (gcd != 0)
-        ui->ratioLabel->setText(QString::number(width / gcd) + ":" + QString::number(height / gcd));
-    if (frameCount != 0) {
+        fields.ratio = QString::number(width / gcd) + ":" + QString::number(height / gcd);
+    if (frameCount != 0)
+        fields.frames = QString::number(frameCount);
+    return fields;
+}
+
+void QVInfoDialog::updateInfo()
+{
+    const QVFileInfoFields fields = buildFields(selectedFileInfo, width, height, frameCount);
+
+    ui->nameLabel->setText(fields.name);
+    ui->typeLabel->setText(fields.type);
+    ui->locationLabel->setText(fields.location);
+    ui->sizeLabel->setText(fields.size);
+    ui->modifiedLabel->setText(fields.modified);
+    ui->dimensionsLabel->setText(fields.dimensions);
+    ui->ratioLabel->setText(fields.ratio);
+    if (!fields.frames.isEmpty()) {
         ui->framesLabel2->show();
         ui->framesLabel->show();
-        ui->framesLabel->setText(QString::number(frameCount));
+        ui->framesLabel->setText(fields.frames);
     } else {
         ui->framesLabel2->hide();
         ui->framesLabel->hide();

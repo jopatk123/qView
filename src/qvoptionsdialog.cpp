@@ -192,6 +192,8 @@ void QVOptionsDialog::syncSettings(bool defaults, bool makeConnections)
     syncComboBox(ui->thumbnailBarComboBox, "thumbnailbarposition", defaults, makeConnections);
     // thumbnailbarsize
     syncComboBox(ui->thumbnailBarSizeComboBox, "thumbnailbarsize", defaults, makeConnections);
+    // fileinfopanelposition
+    syncComboBox(ui->fileInfoPanelComboBox, "fileinfopanelposition", defaults, makeConnections);
     // menubarenabled
     syncCheckbox(ui->menubarCheckbox, "menubarenabled", defaults, makeConnections);
     // fullscreendetails

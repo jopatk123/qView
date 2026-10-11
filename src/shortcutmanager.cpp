@@ -154,6 +154,10 @@ void ShortcutManager::initializeShortcutsList()
                            "togglethumbnailbar",
                            QStringList(QKeySequence(Qt::Key_T).toString()),
                            {} });
+    shortcutsList.append({ tr("File Info Panel"),
+                           "togglefileinfopanel",
+                           QStringList(QKeySequence(Qt::SHIFT | Qt::Key_I).toString()),
+                           {} });
     shortcutsList.append({ tr("Save Frame As"),
                            "saveframeas",
                            keyBindingsToStringList(QKeySequence::Save),

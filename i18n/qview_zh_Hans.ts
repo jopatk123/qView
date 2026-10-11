@@ -210,6 +210,12 @@
     </message>
     <message>
         <location filename="../src/actionmanager.cpp" line="763"/>
+        <source>File Info &amp;Panel</source>
+        <extracomment>Cycles the file info panel between hidden, the right side, and the bottom</extracomment>
+        <translation>文件信息栏(&amp;P)</translation>
+    </message>
+    <message>
+        <location filename="../src/actionmanager.cpp" line="763"/>
         <source>Enter F&amp;ull Screen</source>
         <translation>全屏(&amp;F)</translation>
     </message>
@@ -1312,6 +1318,21 @@ No write permission or file is read-only.</source>
         <translation>大</translation>
     </message>
     <message>
+        <location filename="../src/qvoptionsdialog.ui" line="412"/>
+        <source>Choose whether file info stays beside the image, or hide it entirely</source>
+        <translation>选择是否在图片旁边常驻显示文件信息，或将其隐藏</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="415"/>
+        <source>File info panel:</source>
+        <translation>文件信息栏：</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="431"/>
+        <source>Right</source>
+        <translation>右侧</translation>
+    </message>
+    <message>
         <location filename="../src/qvoptionsdialog.ui" line="547"/>
         <source>When enabled, the scrolling action zooms the image</source>
         <translation>启用后，滚动操作会缩放图像</translation>
@@ -1570,6 +1591,11 @@ No write permission or file is read-only.</source>
         <translation>缩略图栏</translation>
     </message>
     <message>
+        <location filename="../src/shortcutmanager.cpp" line="157"/>
+        <source>File Info Panel</source>
+        <translation>文件信息栏</translation>
+    </message>
+    <message>
         <location filename="../src/shortcutmanager.cpp" line="108"/>
         <source>Save Frame As</source>
         <translation>保存帧为</translation>
@@ -1677,6 +1703,54 @@ No write permission or file is read-only.</source>
 You can reenable them in the options dialog.</source>
         <translation>已禁用更新通知.
 你可以在选项中重新启用它们.</translation>
+    </message>
+</context>
+<context>
+    <name>QVFileInfoPanel</name>
+    <message>
+        <location filename="../src/qvfileinfopanel.cpp" line="52"/>
+        <source>Name:</source>
+        <translation>名称:</translation>
+    </message>
+    <message>
+        <location filename="../src/qvfileinfopanel.cpp" line="53"/>
+        <source>Type:</source>
+        <translation>类型:</translation>
+    </message>
+    <message>
+        <location filename="../src/qvfileinfopanel.cpp" line="54"/>
+        <source>Location:</source>
+        <translation>路径:</translation>
+    </message>
+    <message>
+        <location filename="../src/qvfileinfopanel.cpp" line="55"/>
+        <source>Size:</source>
+        <translation>文件大小:</translation>
+    </message>
+    <message>
+        <location filename="../src/qvfileinfopanel.cpp" line="56"/>
+        <source>Modified:</source>
+        <translation>修改日期:</translation>
+    </message>
+    <message>
+        <location filename="../src/qvfileinfopanel.cpp" line="57"/>
+        <source>Dimensions:</source>
+        <translation>尺寸:</translation>
+    </message>
+    <message>
+        <location filename="../src/qvfileinfopanel.cpp" line="58"/>
+        <source>Aspect Ratio:</source>
+        <translation>纵横比:</translation>
+    </message>
+    <message>
+        <location filename="../src/qvfileinfopanel.cpp" line="59"/>
+        <source>Frames:</source>
+        <translation>帧数:</translation>
+    </message>
+    <message>
+        <location filename="../src/qvfileinfopanel.cpp" line="176"/>
+        <source>%1 frames</source>
+        <translation>%1 帧</translation>
     </message>
 </context>
 </TS>

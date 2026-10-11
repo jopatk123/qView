@@ -16,6 +16,7 @@ set(TEST_SOURCES
     ../src/qvrenamedialog.cpp
     ../src/qvwelcomedialog.cpp
     ../src/qvinfodialog.cpp
+    ../src/qvfileinfopanel.cpp
     ../src/qvimagecore.cpp
     ../src/qvshortcutdialog.cpp
     ../src/qvthumbnailbar.cpp

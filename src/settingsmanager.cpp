@@ -60,7 +60,9 @@ static const SettingDefinition settingDefinitions[] = {
     { SettingsManager::Setting::SkipHidden, true, "skiphidden" },
     // Thumbnail bar settings
     { SettingsManager::Setting::ThumbnailBarPosition, 1, "thumbnailbarposition" },
-    { SettingsManager::Setting::ThumbnailBarSize, 1, "thumbnailbarsize" }
+    { SettingsManager::Setting::ThumbnailBarSize, 1, "thumbnailbarsize" },
+    // File info panel: 0 hidden, 1 right, 2 bottom
+    { SettingsManager::Setting::FileInfoPanelPosition, 0, "fileinfopanelposition" }
 };
 
 // settingKeys is a file-static variable, it doesn't need to be a member

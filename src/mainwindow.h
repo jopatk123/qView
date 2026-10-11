@@ -16,6 +16,7 @@ class MainWindow;
 }
 
 class QHBoxLayout;
+class QVFileInfoPanel;
 class QVThumbnailBar;
 
 class MainWindow : public QMainWindow
@@ -118,6 +119,8 @@ public:
 
     void toggleThumbnailBar();
 
+    void toggleFileInfoPanel();
+
     int getTitlebarOverlap() const;
 
     const QVImageCore::FileDetails &getCurrentFileDetails() const
@@ -166,8 +169,10 @@ private:
     QVGraphicsView *graphicsView;
 
     QVThumbnailBar *thumbnailBar;
-    QHBoxLayout *thumbnailSideLayout = nullptr;
-    int thumbnailBarLayoutMode = 0;
+    QVFileInfoPanel *fileInfoPanel;
+    QHBoxLayout *imageRowLayout = nullptr;
+    int appliedThumbnailPosition = 0;
+    int appliedInfoPosition = 0;
 
     QMenu *contextMenu;
     QMenu *virtualMenu;
@@ -190,6 +195,8 @@ private:
 
     QTimer *populateOpenWithTimer;
     QFutureWatcher<QList<OpenWith::OpenWithItem>> openWithFutureWatcher;
+
+    void updateFileInfo(bool updateDialog, bool updatePanel);
 
     void updateThumbnailBarPosition();
 };

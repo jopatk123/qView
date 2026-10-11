@@ -4,6 +4,10 @@
 #include "qvcocoafunctions.h"
 #include "qvrenamedialog.h"
 #include "qvthumbnailbar.h"
+#include "qvfileinfopanel.h"
+
+#include <QHBoxLayout>
+#include <QVBoxLayout>
 
 #include <QFileDialog>
 #include <QMessageBox>
@@ -58,6 +62,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     thumbnailBar = new QVThumbnailBar(this);
     thumbnailBar->hide();
     connect(thumbnailBar, &QVThumbnailBar::fileRequested, this, &MainWindow::openFile);
+
+    // Persistent file info, shown when the matching setting is not hidden
+    fileInfoPanel = new QVFileInfoPanel(this);
+    fileInfoPanel->hide();
 
     // Hide fullscreen label by default
     ui->fullscreenLabel->hide();
@@ -375,6 +383,9 @@ void MainWindow::settingsUpdated()
             && windowState().testFlag(Qt::WindowFullScreen));
 
     thumbnailBar->settingsUpdated();
+    fileInfoPanel->settingsUpdated();
+    if (qvGetSettingInt(FileInfoPanelPosition) != 0)
+        refreshProperties();
     updateThumbnailBarPosition();
 
     setWindowSize();
@@ -411,10 +422,8 @@ void MainWindow::fileChanged()
 
     // Sync the thumbnail bar with the current file list
     thumbnailBar->syncFromCore(getCurrentFileDetails());
+    refreshProperties();
     updateThumbnailBarPosition();
-
-    if (info->isVisible())
-        refreshProperties();
     updateWindowTitle();
     updateWindowFilePath();
 
@@ -493,15 +502,27 @@ void MainWindow::populateOpenWithMenu(const QList<OpenWith::OpenWithItem> openWi
     }
 }
 
+void MainWindow::updateFileInfo(bool updateDialog, bool updatePanel)
+{
+    if (!updateDialog && !updatePanel)
+        return;
+
+    int frameCount = 0;
+    if (getCurrentFileDetails().isMovieLoaded)
+        frameCount = graphicsView->getLoadedMovie().frameCount();
+
+    const QFileInfo &fileInfo = getCurrentFileDetails().fileInfo;
+    const int width = getCurrentFileDetails().baseImageSize.width();
+    const int height = getCurrentFileDetails().baseImageSize.height();
+    if (updateDialog)
+        info->setInfo(fileInfo, width, height, frameCount);
+    if (updatePanel)
+        fileInfoPanel->setInfo(fileInfo, width, height, frameCount);
+}
+
 void MainWindow::refreshProperties()
 {
-    int value4;
-    if (getCurrentFileDetails().isMovieLoaded)
-        value4 = graphicsView->getLoadedMovie().frameCount();
-    else
-        value4 = 0;
-    info->setInfo(getCurrentFileDetails().fileInfo, getCurrentFileDetails().baseImageSize.width(),
-                  getCurrentFileDetails().baseImageSize.height(), value4);
+    updateFileInfo(info->isVisible(), qvGetSettingInt(FileInfoPanelPosition) != 0);
 }
 
 void MainWindow::updateWindowTitle()
@@ -587,16 +608,27 @@ void MainWindow::setWindowSize()
     if (!screenValid)
         currentScreen = QGuiApplication::screens().at(0);
 
+    // The pixmap signal runs before fileChanged, so side panels are not in the
+    // layout yet. Place them first so the new window size includes them.
+    updateThumbnailBarPosition();
+
     QSize extraWidgetsSize{ 0, 0 };
 
     if (menuBar()->isVisible())
         extraWidgetsSize.rheight() += menuBar()->height();
 
     if (thumbnailBar->isVisible()) {
-        if (thumbnailBarLayoutMode == 2)
+        if (appliedThumbnailPosition == 2)
             extraWidgetsSize.rwidth() += thumbnailBar->width();
         else
             extraWidgetsSize.rheight() += thumbnailBar->height();
+    }
+
+    if (fileInfoPanel->isVisible()) {
+        if (appliedInfoPosition == 1)
+            extraWidgetsSize.rwidth() += fileInfoPanel->width();
+        else
+            extraWidgetsSize.rheight() += fileInfoPanel->height();
     }
 
     const int titlebarOverlap = getTitlebarOverlap();
@@ -791,7 +823,7 @@ void MainWindow::openContainingFolder()
 
 void MainWindow::showFileInfo()
 {
-    refreshProperties();
+    updateFileInfo(true, qvGetSettingInt(FileInfoPanelPosition) != 0);
     info->show();
     info->raise();
 }
@@ -1231,52 +1263,87 @@ void MainWindow::toggleThumbnailBar()
     qvApp->getSettingsManager().loadSettings();
 }
 
+void MainWindow::toggleFileInfoPanel()
+{
+    // Cycle: hidden -> right -> bottom -> hidden
+    const int nextPosition = (qvGetSettingInt(FileInfoPanelPosition) + 1) % 3;
+
+    QSettings settings;
+    settings.beginGroup("options");
+    settings.setValue("fileinfopanelposition", nextPosition);
+    qvApp->getSettingsManager().loadSettings();
+}
+
 void MainWindow::updateThumbnailBarPosition()
 {
-    const int position = qvGetSettingInt(ThumbnailBarPosition);
+    const int thumbnailSetting = qvGetSettingInt(ThumbnailBarPosition);
+    const int infoSetting = qvGetSettingInt(FileInfoPanelPosition);
     const bool isFullscreen = windowState().testFlag(Qt::WindowFullScreen);
-    const bool shouldBeVisible = position != 0 && !isFullscreen
-            && !getCurrentFileDetails().folderFileInfoList.isEmpty();
+    const int thumbnailPosition = thumbnailSetting != 0 && !isFullscreen
+                    && !getCurrentFileDetails().folderFileInfoList.isEmpty()
+            ? thumbnailSetting
+            : 0;
+    const int infoPosition =
+            infoSetting != 0 && !isFullscreen && getCurrentFileDetails().fileInfo.isFile()
+            ? infoSetting
+            : 0;
 
-    // The layout only tracks the position that is actually in use right now,
-    // 0 when the bar is hidden or fullscreen
-    const int effectivePosition = shouldBeVisible ? position : 0;
-
-    if (effectivePosition != thumbnailBarLayoutMode) {
+    if (thumbnailPosition != appliedThumbnailPosition || infoPosition != appliedInfoPosition) {
         auto *mainLayout = static_cast<QVBoxLayout *>(centralWidget()->layout());
 
-        // Tear down the previous arrangement
-        if (thumbnailBarLayoutMode == 2) {
-            // Bar was on the left, move the graphics view back into the main layout
-            thumbnailSideLayout->removeWidget(graphicsView);
-            thumbnailSideLayout->removeWidget(thumbnailBar);
-            mainLayout->removeItem(thumbnailSideLayout);
-            delete thumbnailSideLayout;
-            thumbnailSideLayout = nullptr;
-            mainLayout->insertWidget(1, graphicsView);
+        if (imageRowLayout) {
+            imageRowLayout->removeWidget(graphicsView);
+            imageRowLayout->removeWidget(thumbnailBar);
+            imageRowLayout->removeWidget(fileInfoPanel);
+            mainLayout->removeItem(imageRowLayout);
+            delete imageRowLayout;
+            imageRowLayout = nullptr;
+        }
+
+        mainLayout->removeWidget(graphicsView);
+        mainLayout->removeWidget(thumbnailBar);
+        mainLayout->removeWidget(fileInfoPanel);
+
+        const bool thumbnailOnLeft =
+                thumbnailPosition == static_cast<int>(QVThumbnailBar::Position::Left);
+        const bool infoOnRight =
+                infoPosition == static_cast<int>(QVFileInfoPanel::Position::Right);
+
+        if (thumbnailPosition != 0)
+            thumbnailBar->setPosition(thumbnailPosition);
+        if (infoPosition != 0)
+            fileInfoPanel->setPosition(infoPosition);
+
+        if (thumbnailOnLeft || infoOnRight) {
+            imageRowLayout = new QHBoxLayout();
+            imageRowLayout->setContentsMargins(0, 0, 0, 0);
+            imageRowLayout->setSpacing(0);
+            if (thumbnailOnLeft)
+                imageRowLayout->addWidget(thumbnailBar);
+            imageRowLayout->addWidget(graphicsView, 1);
+            if (infoOnRight)
+                imageRowLayout->addWidget(fileInfoPanel);
+            mainLayout->insertLayout(1, imageRowLayout);
         } else {
-            mainLayout->removeWidget(thumbnailBar);
+            mainLayout->insertWidget(1, graphicsView);
         }
 
-        if (effectivePosition == 1) {
-            // Bottom: append after the graphics view
-            thumbnailBar->setPosition(1);
+        if (infoPosition == static_cast<int>(QVFileInfoPanel::Position::Bottom))
+            mainLayout->addWidget(fileInfoPanel);
+        if (thumbnailPosition == static_cast<int>(QVThumbnailBar::Position::Bottom))
             mainLayout->addWidget(thumbnailBar);
-        } else if (effectivePosition == 2) {
-            // Left: side-by-side with the graphics view
-            thumbnailBar->setPosition(2);
-            mainLayout->removeWidget(graphicsView);
-            thumbnailSideLayout = new QHBoxLayout();
-            thumbnailSideLayout->setContentsMargins(0, 0, 0, 0);
-            thumbnailSideLayout->setSpacing(0);
-            thumbnailSideLayout->addWidget(thumbnailBar);
-            thumbnailSideLayout->addWidget(graphicsView);
-            mainLayout->insertLayout(1, thumbnailSideLayout);
-        }
 
-        thumbnailBarLayoutMode = effectivePosition;
+        appliedThumbnailPosition = thumbnailPosition;
+        appliedInfoPosition = infoPosition;
     }
 
-    thumbnailBar->setTitlebarInset(effectivePosition == 2 ? getTitlebarOverlap() : 0);
-    thumbnailBar->setVisible(shouldBeVisible);
+    const int titlebarOverlap = getTitlebarOverlap();
+    thumbnailBar->setTitlebarInset(
+            thumbnailPosition == static_cast<int>(QVThumbnailBar::Position::Left) ? titlebarOverlap
+                                                                                  : 0);
+    fileInfoPanel->setTitlebarInset(
+            infoPosition == static_cast<int>(QVFileInfoPanel::Position::Right) ? titlebarOverlap
+                                                                               : 0);
+    thumbnailBar->setVisible(thumbnailPosition != 0);
+    fileInfoPanel->setVisible(infoPosition != 0);
 }

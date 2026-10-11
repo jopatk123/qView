@@ -257,6 +257,7 @@ QMenu *ActionManager::buildViewMenu(bool addIcon, QWidget *parent)
     viewMenu->addSeparator();
     addCloneOfAction(viewMenu, "fullscreen");
     addCloneOfAction(viewMenu, "togglethumbnailbar");
+    addCloneOfAction(viewMenu, "togglefileinfopanel");
 
     menuCloneLibrary.insert(viewMenu->menuAction()->data().toString(), viewMenu);
     return viewMenu;
@@ -604,6 +605,8 @@ void ActionManager::actionTriggered(QAction *triggeredAction, MainWindow *releva
         relevantWindow->toggleFullScreen();
     } else if (key == "togglethumbnailbar") {
         relevantWindow->toggleThumbnailBar();
+    } else if (key == "togglefileinfopanel") {
+        relevantWindow->toggleFileInfoPanel();
     } else if (key == "firstfile") {
         relevantWindow->firstFile();
     } else if (key == "previousfile") {
@@ -757,6 +760,12 @@ void ActionManager::initializeActionLibrary()
             new QAction(QIcon::fromTheme("view-preview"), tr("&Thumbnail Bar"));
     toggleThumbnailBarAction->setData({ "windowdisable" });
     actionLibrary.insert("togglethumbnailbar", toggleThumbnailBarAction);
+
+    //: Cycles the file info panel between hidden, the right side, and the bottom
+    auto *toggleFileInfoPanelAction =
+            new QAction(QIcon::fromTheme("document-properties"), tr("File Info &Panel"));
+    toggleFileInfoPanelAction->setData({ "windowdisable" });
+    actionLibrary.insert("togglefileinfopanel", toggleFileInfoPanelAction);
 
     auto *firstFileAction = new QAction(QIcon::fromTheme("go-first"), tr("&First File"));
     firstFileAction->setData({ "folderdisable" });

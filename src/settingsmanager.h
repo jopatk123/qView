@@ -55,7 +55,9 @@ public:
         SkipHidden,
         // Thumbnail bar settings
         ThumbnailBarPosition,
-        ThumbnailBarSize
+        ThumbnailBarSize,
+        // File info panel settings
+        FileInfoPanelPosition
     };
     Q_ENUM(Setting)
 

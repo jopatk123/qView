@@ -4,6 +4,19 @@
 #include <QDialog>
 #include <QFileInfo>
 #include <QLocale>
+#include <QString>
+
+struct QVFileInfoFields
+{
+    QString name;
+    QString type;
+    QString location;
+    QString size;
+    QString modified;
+    QString dimensions;
+    QString ratio;
+    QString frames;
+};
 
 namespace Ui {
 class QVInfoDialog;
@@ -20,6 +33,9 @@ public:
     void setInfo(const QFileInfo &value, const int &value2, const int &value3, const int &value4);
 
     void updateInfo();
+
+    static QVFileInfoFields buildFields(const QFileInfo &fileInfo, int width, int height,
+                                        int frameCount);
 
 private:
     Ui::QVInfoDialog *ui;
