@@ -112,7 +112,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     actionManager.addCloneOfAction(contextMenu, "previousfile");
     contextMenu->addSeparator();
     contextMenu->addMenu(actionManager.buildViewMenu(true, contextMenu));
-    contextMenu->addMenu(actionManager.buildToolsMenu(true, contextMenu));
+    contextMenu->addMenu(actionManager.buildToolsMenu(true, contextMenu, false));
+    contextMenu->addSeparator();
+    actionManager.addCloneOfAction(contextMenu, "options");
     contextMenu->addMenu(actionManager.buildHelpMenu(true, contextMenu));
 
     connect(contextMenu, &QMenu::triggered, this, [this](QAction *triggeredAction) {

@@ -103,7 +103,8 @@ public:
 
     QMenu *buildViewMenu(bool addIcon = true, QWidget *parent = nullptr);
 
-    QMenu *buildToolsMenu(bool addIcon = true, QWidget *parent = nullptr);
+    QMenu *buildToolsMenu(bool addIcon = true, QWidget *parent = nullptr,
+                          bool includeSettings = true);
 
     QMenu *buildHelpMenu(bool addIcon = true, QWidget *parent = nullptr);
 

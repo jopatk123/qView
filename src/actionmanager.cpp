@@ -263,7 +263,7 @@ QMenu *ActionManager::buildViewMenu(bool addIcon, QWidget *parent)
     return viewMenu;
 }
 
-QMenu *ActionManager::buildToolsMenu(bool addIcon, QWidget *parent)
+QMenu *ActionManager::buildToolsMenu(bool addIcon, QWidget *parent, bool includeSettings)
 {
     auto *toolsMenu = new QMenu(tr("&Tools"), parent);
     toolsMenu->menuAction()->setData("tools");
@@ -279,7 +279,8 @@ QMenu *ActionManager::buildToolsMenu(bool addIcon, QWidget *parent)
     addCloneOfAction(toolsMenu, "increasespeed");
     toolsMenu->addSeparator();
     addCloneOfAction(toolsMenu, "slideshow");
-    addCloneOfAction(toolsMenu, "options");
+    if (includeSettings)
+        addCloneOfAction(toolsMenu, "options");
 
     menuCloneLibrary.insert(toolsMenu->menuAction()->data().toString(), toolsMenu);
     return toolsMenu;
