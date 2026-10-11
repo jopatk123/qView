@@ -188,6 +188,10 @@ void QVOptionsDialog::syncSettings(bool defaults, bool makeConnections)
     syncCheckbox(ui->quitOnLastWindowCheckbox, "quitonlastwindow", defaults, makeConnections);
     // ctrldragwindow
     syncCheckbox(ui->ctrlDragCheckbox, "ctrldragwindow", defaults, makeConnections);
+    // thumbnailbarposition
+    syncComboBox(ui->thumbnailBarComboBox, "thumbnailbarposition", defaults, makeConnections);
+    // thumbnailbarsize
+    syncComboBox(ui->thumbnailBarSizeComboBox, "thumbnailbarsize", defaults, makeConnections);
     // menubarenabled
     syncCheckbox(ui->menubarCheckbox, "menubarenabled", defaults, makeConnections);
     // fullscreendetails

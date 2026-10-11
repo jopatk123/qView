@@ -150,6 +150,10 @@ void ShortcutManager::initializeShortcutsList()
         shortcutsList.last().defaultShortcuts << QKeySequence(Qt::Key_F11).toString();
     }
 #endif
+    shortcutsList.append({ tr("Thumbnail Bar"),
+                           "togglethumbnailbar",
+                           QStringList(QKeySequence(Qt::Key_T).toString()),
+                           {} });
     shortcutsList.append({ tr("Save Frame As"),
                            "saveframeas",
                            keyBindingsToStringList(QKeySequence::Save),

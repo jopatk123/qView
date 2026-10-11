@@ -3,6 +3,7 @@
 #include "qvapplication.h"
 #include "qvcocoafunctions.h"
 #include "qvrenamedialog.h"
+#include "qvthumbnailbar.h"
 
 #include <QFileDialog>
 #include <QMessageBox>
@@ -52,6 +53,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     // Initialize graphicsviewkDefaultBufferAlignment
     graphicsView = new QVGraphicsView(this);
     centralWidget()->layout()->addWidget(graphicsView);
+
+    // Initialize thumbnail bar
+    thumbnailBar = new QVThumbnailBar(this);
+    thumbnailBar->hide();
+    connect(thumbnailBar, &QVThumbnailBar::fileRequested, this, &MainWindow::openFile);
 
     // Hide fullscreen label by default
     ui->fullscreenLabel->hide();
@@ -198,8 +204,11 @@ void MainWindow::showEvent(QShowEvent *event)
     // functionality even if we enable this after. Presumably restoreGeometry saves data for
     // further processing after the window is shown, hence the timer here to queue this on the
     // event loop and run after that processing happens.
-    QTimer::singleShot(
-            0, this, [this]() { QVCocoaFunctions::setFullSizeContentView(windowHandle(), true); });
+    QTimer::singleShot(0, this, [this]() {
+        QVCocoaFunctions::setFullSizeContentView(windowHandle(), true);
+        // The titlebar overlap is only known after the full-size content view is on.
+        updateThumbnailBarPosition();
+    });
 #endif
 
     if (!menuBar()->sizeHint().isEmpty()) {
@@ -318,6 +327,8 @@ void MainWindow::fullscreenChanged()
     ui->fullscreenLabel->setVisible(
             isFullscreen
             && qvApp->getSettingsManager().getBool(SettingsManager::Setting::FullScreenDetails));
+
+    updateThumbnailBarPosition();
 }
 
 void MainWindow::openFile(const QString &fileName)
@@ -363,6 +374,9 @@ void MainWindow::settingsUpdated()
             settingsManager.getBool(SettingsManager::Setting::FullScreenDetails)
             && windowState().testFlag(Qt::WindowFullScreen));
 
+    thumbnailBar->settingsUpdated();
+    updateThumbnailBarPosition();
+
     setWindowSize();
 
     // repaint in case background color changed
@@ -394,6 +408,10 @@ void MainWindow::fileChanged()
 {
     populateOpenWithTimer->start();
     disableActions();
+
+    // Sync the thumbnail bar with the current file list
+    thumbnailBar->syncFromCore(getCurrentFileDetails());
+    updateThumbnailBarPosition();
 
     if (info->isVisible())
         refreshProperties();
@@ -573,6 +591,13 @@ void MainWindow::setWindowSize()
 
     if (menuBar()->isVisible())
         extraWidgetsSize.rheight() += menuBar()->height();
+
+    if (thumbnailBar->isVisible()) {
+        if (thumbnailBarLayoutMode == 2)
+            extraWidgetsSize.rwidth() += thumbnailBar->width();
+        else
+            extraWidgetsSize.rheight() += thumbnailBar->height();
+    }
 
     const int titlebarOverlap = getTitlebarOverlap();
     if (titlebarOverlap != 0)
@@ -1193,4 +1218,65 @@ int MainWindow::getTitlebarOverlap() const
 #endif
 
     return 0;
+}
+
+void MainWindow::toggleThumbnailBar()
+{
+    // Cycle: hidden -> bottom -> left -> hidden
+    const int nextPosition = (qvGetSettingInt(ThumbnailBarPosition) + 1) % 3;
+
+    QSettings settings;
+    settings.beginGroup("options");
+    settings.setValue("thumbnailbarposition", nextPosition);
+    qvApp->getSettingsManager().loadSettings();
+}
+
+void MainWindow::updateThumbnailBarPosition()
+{
+    const int position = qvGetSettingInt(ThumbnailBarPosition);
+    const bool isFullscreen = windowState().testFlag(Qt::WindowFullScreen);
+    const bool shouldBeVisible = position != 0 && !isFullscreen
+            && !getCurrentFileDetails().folderFileInfoList.isEmpty();
+
+    // The layout only tracks the position that is actually in use right now,
+    // 0 when the bar is hidden or fullscreen
+    const int effectivePosition = shouldBeVisible ? position : 0;
+
+    if (effectivePosition != thumbnailBarLayoutMode) {
+        auto *mainLayout = static_cast<QVBoxLayout *>(centralWidget()->layout());
+
+        // Tear down the previous arrangement
+        if (thumbnailBarLayoutMode == 2) {
+            // Bar was on the left, move the graphics view back into the main layout
+            thumbnailSideLayout->removeWidget(graphicsView);
+            thumbnailSideLayout->removeWidget(thumbnailBar);
+            mainLayout->removeItem(thumbnailSideLayout);
+            delete thumbnailSideLayout;
+            thumbnailSideLayout = nullptr;
+            mainLayout->insertWidget(1, graphicsView);
+        } else {
+            mainLayout->removeWidget(thumbnailBar);
+        }
+
+        if (effectivePosition == 1) {
+            // Bottom: append after the graphics view
+            thumbnailBar->setPosition(1);
+            mainLayout->addWidget(thumbnailBar);
+        } else if (effectivePosition == 2) {
+            // Left: side-by-side with the graphics view
+            thumbnailBar->setPosition(2);
+            mainLayout->removeWidget(graphicsView);
+            thumbnailSideLayout = new QHBoxLayout();
+            thumbnailSideLayout->setContentsMargins(0, 0, 0, 0);
+            thumbnailSideLayout->setSpacing(0);
+            thumbnailSideLayout->addWidget(thumbnailBar);
+            thumbnailSideLayout->addWidget(graphicsView);
+            mainLayout->insertLayout(1, thumbnailSideLayout);
+        }
+
+        thumbnailBarLayoutMode = effectivePosition;
+    }
+
+    thumbnailBar->setTitlebarInset(effectivePosition == 2 ? getTitlebarOverlap() : 0);
+    thumbnailBar->setVisible(shouldBeVisible);
 }

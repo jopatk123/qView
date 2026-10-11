@@ -256,6 +256,7 @@ QMenu *ActionManager::buildViewMenu(bool addIcon, QWidget *parent)
     addCloneOfAction(viewMenu, "flip");
     viewMenu->addSeparator();
     addCloneOfAction(viewMenu, "fullscreen");
+    addCloneOfAction(viewMenu, "togglethumbnailbar");
 
     menuCloneLibrary.insert(viewMenu->menuAction()->data().toString(), viewMenu);
     return viewMenu;
@@ -601,6 +602,8 @@ void ActionManager::actionTriggered(QAction *triggeredAction, MainWindow *releva
         relevantWindow->flip();
     } else if (key == "fullscreen") {
         relevantWindow->toggleFullScreen();
+    } else if (key == "togglethumbnailbar") {
+        relevantWindow->toggleThumbnailBar();
     } else if (key == "firstfile") {
         relevantWindow->firstFile();
     } else if (key == "previousfile") {
@@ -749,6 +752,11 @@ void ActionManager::initializeActionLibrary()
     fullScreenAction->setMenuRole(QAction::NoRole);
     fullScreenAction->setData({ "windowdisable" });
     actionLibrary.insert("fullscreen", fullScreenAction);
+
+    auto *toggleThumbnailBarAction =
+            new QAction(QIcon::fromTheme("view-preview"), tr("&Thumbnail Bar"));
+    toggleThumbnailBarAction->setData({ "windowdisable" });
+    actionLibrary.insert("togglethumbnailbar", toggleThumbnailBarAction);
 
     auto *firstFileAction = new QAction(QIcon::fromTheme("go-first"), tr("&First File"));
     firstFileAction->setData({ "folderdisable" });

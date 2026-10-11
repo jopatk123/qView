@@ -60,6 +60,8 @@ set(PROJECT_SOURCES
     src/qvinfodialog.cpp
     src/qvimagecore.cpp
     src/qvshortcutdialog.cpp
+    src/qvthumbnailbar.cpp
+    src/qvthumbnailloader.cpp
     src/actionmanager.cpp
     src/settingsmanager.cpp
     src/shortcutmanager.cpp
@@ -78,6 +80,8 @@ set(PROJECT_HEADERS
     src/qvinfodialog.h
     src/qvimagecore.h
     src/qvshortcutdialog.h
+    src/qvthumbnailbar.h
+    src/qvthumbnailloader.h
     src/actionmanager.h
     src/settingsmanager.h
     src/shortcutmanager.h
@@ -95,7 +99,7 @@ set(PROJECT_FORMS
 )
 
 # To disables both manual and automatic checking for updates
-option(QV_DISABLE_ONLINE_VERSION_CHECK "Disable online version check" OFF)
+option(QV_DISABLE_ONLINE_VERSION_CHECK "Disable online version check" ON)
 if(NOT QV_DISABLE_ONLINE_VERSION_CHECK)
     list(APPEND PROJECT_SOURCES src/updatechecker.cpp)
     list(APPEND PROJECT_HEADERS src/updatechecker.h)
@@ -147,7 +151,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # Add compile definitions based on options
-if(NOT QV_DISABLE_ONLINE_VERSION_CHECK)
+if(QV_DISABLE_ONLINE_VERSION_CHECK)
     target_compile_definitions(${PROJECT_NAME} PRIVATE QV_DISABLE_ONLINE_VERSION_CHECK)
 endif()
 
@@ -221,7 +225,7 @@ if(DEFINED NIGHTLY)
 endif()
 
 # Handle translations
-if(Qt${QT_VERSION_MAJOR}_LinguistTools_FOUND)
+if(Qt${QT_VERSION_MAJOR}LinguistTools_FOUND)
     message(STATUS "LinguistTools found, building translations.")
     file(GLOB TRANSLATIONS "i18n/qview_*.ts")
     if(QT_VERSION_MAJOR EQUAL 5)

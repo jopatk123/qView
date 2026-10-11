@@ -15,6 +15,9 @@ namespace Ui {
 class MainWindow;
 }
 
+class QHBoxLayout;
+class QVThumbnailBar;
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -113,6 +116,8 @@ public:
 
     void toggleFullScreen();
 
+    void toggleThumbnailBar();
+
     int getTitlebarOverlap() const;
 
     const QVImageCore::FileDetails &getCurrentFileDetails() const
@@ -160,6 +165,10 @@ private:
     Ui::MainWindow *ui;
     QVGraphicsView *graphicsView;
 
+    QVThumbnailBar *thumbnailBar;
+    QHBoxLayout *thumbnailSideLayout = nullptr;
+    int thumbnailBarLayoutMode = 0;
+
     QMenu *contextMenu;
     QMenu *virtualMenu;
 
@@ -181,6 +190,8 @@ private:
 
     QTimer *populateOpenWithTimer;
     QFutureWatcher<QList<OpenWith::OpenWithItem>> openWithFutureWatcher;
+
+    void updateThumbnailBarPosition();
 };
 
 #endif // MAINWINDOW_H

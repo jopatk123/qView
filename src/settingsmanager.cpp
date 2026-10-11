@@ -56,7 +56,10 @@ static const SettingDefinition settingDefinitions[] = {
     { SettingsManager::Setting::AllowMimeContentDetection, false, "allowmimecontentdetection" },
     { SettingsManager::Setting::SaveRecents, true, "saverecents" },
     { SettingsManager::Setting::UpdateNotifications, false, "updatenotifications" },
-    { SettingsManager::Setting::SkipHidden, true, "skiphidden" }
+    { SettingsManager::Setting::SkipHidden, true, "skiphidden" },
+    // Thumbnail bar settings
+    { SettingsManager::Setting::ThumbnailBarPosition, 1, "thumbnailbarposition" },
+    { SettingsManager::Setting::ThumbnailBarSize, 1, "thumbnailbarsize" }
 };
 
 // settingKeys is a file-static variable, it doesn't need to be a member

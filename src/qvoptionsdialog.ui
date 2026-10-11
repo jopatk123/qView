@@ -342,6 +342,70 @@
             </property>
            </widget>
           </item>
+          <item row="16" column="0">
+           <widget class="QLabel" name="thumbnailBarLabel">
+            <property name="toolTip">
+             <string>Choose the position of the thumbnail bar, or hide it entirely</string>
+            </property>
+            <property name="text">
+             <string>Thumbnail bar:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="16" column="1">
+           <widget class="QComboBox" name="thumbnailBarComboBox">
+            <property name="toolTip">
+             <string>Choose the position of the thumbnail bar, or hide it entirely</string>
+            </property>
+            <item>
+             <property name="text">
+              <string>Hidden</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Bottom</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Left</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+          <item row="17" column="0">
+           <widget class="QLabel" name="thumbnailBarSizeLabel">
+            <property name="toolTip">
+             <string>Choose the size of thumbnails in the thumbnail bar</string>
+            </property>
+            <property name="text">
+             <string>Thumbnail size:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="17" column="1">
+           <widget class="QComboBox" name="thumbnailBarSizeComboBox">
+            <property name="toolTip">
+             <string>Choose the size of thumbnails in the thumbnail bar</string>
+            </property>
+            <item>
+             <property name="text">
+              <string>Small</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Medium</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Large</string>
+             </property>
+            </item>
+           </widget>
+          </item>
          </layout>
         </widget>
        </widget>

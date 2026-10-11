@@ -52,7 +52,10 @@ public:
         AllowMimeContentDetection,
         SaveRecents,
         UpdateNotifications,
-        SkipHidden
+        SkipHidden,
+        // Thumbnail bar settings
+        ThumbnailBarPosition,
+        ThumbnailBarSize
     };
     Q_ENUM(Setting)
 
