@@ -16,6 +16,8 @@ class MainWindow;
 }
 
 class QHBoxLayout;
+class QToolButton;
+class QVBoxLayout;
 class QVFileInfoPanel;
 class QVThumbnailBar;
 
@@ -65,9 +67,11 @@ public:
 
     void showFileInfo();
 
-    void askDeleteFile(bool permanent);
+    // showNext forces the following image after a successful delete. The menu
+    // actions leave it false and follow the After Deletion setting.
+    void askDeleteFile(bool permanent, bool showNext = false);
 
-    void deleteFile(bool permanent);
+    void deleteFile(bool permanent, bool showNext = false);
 
     QString deleteFileLinuxFallback(const QString &path, bool putBack);
 
@@ -121,6 +125,10 @@ public:
 
     void toggleFileInfoPanel();
 
+    void toggleThumbnailBarVisible();
+
+    void toggleFileInfoPanelVisible();
+
     int getTitlebarOverlap() const;
 
     const QVImageCore::FileDetails &getCurrentFileDetails() const
@@ -170,6 +178,14 @@ private:
 
     QVThumbnailBar *thumbnailBar;
     QVFileInfoPanel *fileInfoPanel;
+    QWidget *imageColumn = nullptr;
+    QVBoxLayout *imageColumnLayout = nullptr;
+    QWidget *imageToolbar = nullptr;
+    QToolButton *openButton = nullptr;
+    QToolButton *rotateRightButton = nullptr;
+    QToolButton *thumbnailBarButton = nullptr;
+    QToolButton *fileInfoButton = nullptr;
+    QToolButton *trashButton = nullptr;
     QHBoxLayout *imageRowLayout = nullptr;
     int appliedThumbnailPosition = 0;
     int appliedInfoPosition = 0;
@@ -199,6 +215,17 @@ private:
     void updateFileInfo(bool updateDialog, bool updatePanel);
 
     void updateThumbnailBarPosition();
+
+    void setupImageToolbar();
+
+    void updateImageToolbar();
+
+    void rememberVisiblePanels();
+
+    void toggleRememberedPosition(const QString &positionKey, const QString &lastVisibleKey,
+                                  int current, int fallbackVisible);
+
+    static QString actionToolTip(const QString &key);
 };
 
 #endif // MAINWINDOW_H

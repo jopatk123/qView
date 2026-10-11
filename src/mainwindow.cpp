@@ -33,10 +33,50 @@
 #include <QFutureWatcher>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QMenu>
+#include <QToolButton>
 #include <QWindow>
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QTemporaryFile>
+
+namespace {
+
+const int kImageToolbarHeight = 34;
+const int kImageToolbarIconSize = 18;
+
+// Icons sit in the strip under the macOS titlebar. Empty space there still drags the window.
+class ImageToolbar : public QWidget
+{
+public:
+    explicit ImageToolbar(QWidget *parent = nullptr) : QWidget(parent)
+    {
+        setFixedHeight(kImageToolbarHeight);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        setFocusPolicy(Qt::NoFocus);
+    }
+
+protected:
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        if (event->button() == Qt::LeftButton) {
+            const auto state = window()->windowState();
+            if (!state.testFlag(Qt::WindowFullScreen) && !state.testFlag(Qt::WindowMaximized)) {
+#ifdef COCOA_LOADED
+                if (QVCocoaFunctions::startSystemMove(window()))
+                    return;
+#elif QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+                if (window()->windowHandle() && window()->windowHandle()->startSystemMove())
+                    return;
+#else
+                Q_UNUSED(event)
+#endif
+            }
+        }
+        QWidget::mousePressEvent(event);
+    }
+};
+
+} // namespace
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow)
 {
@@ -56,7 +96,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     // Initialize graphicsviewkDefaultBufferAlignment
     graphicsView = new QVGraphicsView(this);
-    centralWidget()->layout()->addWidget(graphicsView);
+    setupImageToolbar();
 
     // Initialize thumbnail bar
     thumbnailBar = new QVThumbnailBar(this);
@@ -384,6 +424,7 @@ void MainWindow::settingsUpdated()
             settingsManager.getBool(SettingsManager::Setting::FullScreenDetails)
             && windowState().testFlag(Qt::WindowFullScreen));
 
+    rememberVisiblePanels();
     thumbnailBar->settingsUpdated();
     fileInfoPanel->settingsUpdated();
     if (qvGetSettingInt(FileInfoPanelPosition) != 0)
@@ -633,6 +674,9 @@ void MainWindow::setWindowSize()
             extraWidgetsSize.rheight() += fileInfoPanel->height();
     }
 
+    if (!windowState().testFlag(Qt::WindowFullScreen))
+        extraWidgetsSize.rheight() += imageToolbar->sizeHint().height();
+
     const int titlebarOverlap = getTitlebarOverlap();
     if (titlebarOverlap != 0)
         extraWidgetsSize.rheight() += titlebarOverlap;
@@ -830,10 +874,10 @@ void MainWindow::showFileInfo()
     info->raise();
 }
 
-void MainWindow::askDeleteFile(bool permanent)
+void MainWindow::askDeleteFile(bool permanent, bool showNext)
 {
     if (!permanent && !qvApp->getSettingsManager().getBool(SettingsManager::Setting::AskDelete)) {
-        deleteFile(permanent);
+        deleteFile(permanent, showNext);
         return;
     }
 
@@ -864,7 +908,7 @@ void MainWindow::askDeleteFile(bool permanent)
     if (!permanent)
         msgBox->setCheckBox(new QCheckBox(tr("Do not ask again")));
 
-    connect(msgBox, &QMessageBox::finished, this, [this, msgBox, permanent](int result) {
+    connect(msgBox, &QMessageBox::finished, this, [this, msgBox, permanent, showNext](int result) {
         if (result != QMessageBox::Yes)
             return;
 
@@ -874,13 +918,13 @@ void MainWindow::askDeleteFile(bool permanent)
             settings.setValue("askdelete", !msgBox->checkBox()->isChecked());
             qvApp->getSettingsManager().loadSettings();
         }
-        this->deleteFile(permanent);
+        this->deleteFile(permanent, showNext);
     });
 
     msgBox->open();
 }
 
-void MainWindow::deleteFile(bool permanent)
+void MainWindow::deleteFile(bool permanent, bool showNext)
 {
     const QFileInfo &fileInfo = getCurrentFileDetails().fileInfo;
     const QString filePath = fileInfo.absoluteFilePath();
@@ -923,9 +967,14 @@ void MainWindow::deleteFile(bool permanent)
     }
 
     auto afterDelete = qvApp->getSettingsManager().getInt(SettingsManager::Setting::AfterDelete);
-    if (afterDelete > 1)
+    if (showNext || afterDelete > 1)
         nextFile();
     else if (afterDelete < 1)
+        previousFile();
+
+    // Toolbar delete always continues with another image. The last file in a folder has no
+    // next image, so show the previous one instead of leaving the window empty.
+    if (showNext && !getCurrentFileDetails().isPixmapLoaded)
         previousFile();
 
     if (!trashFilePath.isEmpty())
@@ -1276,6 +1325,146 @@ void MainWindow::toggleFileInfoPanel()
     qvApp->getSettingsManager().loadSettings();
 }
 
+void MainWindow::toggleThumbnailBarVisible()
+{
+    toggleRememberedPosition("thumbnailbarposition", "thumbnailbarlastvisible",
+                             qvGetSettingInt(ThumbnailBarPosition),
+                             static_cast<int>(QVThumbnailBar::Position::Left));
+}
+
+void MainWindow::toggleFileInfoPanelVisible()
+{
+    toggleRememberedPosition("fileinfopanelposition", "fileinfopanellastvisible",
+                             qvGetSettingInt(FileInfoPanelPosition),
+                             static_cast<int>(QVFileInfoPanel::Position::Right));
+}
+
+void MainWindow::toggleRememberedPosition(const QString &positionKey, const QString &lastVisibleKey,
+                                          int current, int fallbackVisible)
+{
+    QSettings settings;
+    settings.beginGroup("options");
+    int next = 0;
+    if (current == 0) {
+        next = settings.value(lastVisibleKey, fallbackVisible).toInt();
+        if (next == 0)
+            next = fallbackVisible;
+    } else {
+        settings.setValue(lastVisibleKey, current);
+    }
+    settings.setValue(positionKey, next);
+    qvApp->getSettingsManager().loadSettings();
+}
+
+void MainWindow::rememberVisiblePanels()
+{
+    QSettings settings;
+    settings.beginGroup("options");
+    const int thumbnailPosition = qvGetSettingInt(ThumbnailBarPosition);
+    const int infoPosition = qvGetSettingInt(FileInfoPanelPosition);
+    if (thumbnailPosition != 0)
+        settings.setValue("thumbnailbarlastvisible", thumbnailPosition);
+    if (infoPosition != 0)
+        settings.setValue("fileinfopanellastvisible", infoPosition);
+}
+
+QString MainWindow::actionToolTip(const QString &key)
+{
+    const QAction *action = qvApp->getActionManager().getAction(key);
+    if (!action)
+        return {};
+    QString text = action->text();
+    text.remove(QLatin1Char('&'));
+    return text;
+}
+
+void MainWindow::setupImageToolbar()
+{
+    qvApp->ensureFontLoaded(QStringLiteral(":/fonts/MaterialIconsOutlined-Regular.otf"));
+
+    imageColumn = new QWidget(this);
+    imageColumn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    imageColumnLayout = new QVBoxLayout(imageColumn);
+    imageColumnLayout->setSpacing(0);
+    imageColumnLayout->setContentsMargins(0, 0, 0, 0);
+
+    imageToolbar = new ImageToolbar(imageColumn);
+    auto *toolbarLayout = new QHBoxLayout(imageToolbar);
+    toolbarLayout->setSpacing(2);
+    toolbarLayout->setContentsMargins(8, 0, 8, 0);
+
+    const auto addButton = [this, toolbarLayout](const QString &tip, bool checkable) {
+        auto *button = new QToolButton(imageToolbar);
+        button->setAutoRaise(true);
+        button->setFocusPolicy(Qt::NoFocus);
+        button->setToolTip(tip);
+        button->setCheckable(checkable);
+        button->setIconSize(QSize(kImageToolbarIconSize, kImageToolbarIconSize));
+        toolbarLayout->addWidget(button);
+        return button;
+    };
+
+    openButton = addButton(actionToolTip(QStringLiteral("open")), false);
+    rotateRightButton = addButton(actionToolTip(QStringLiteral("rotateright")), false);
+    thumbnailBarButton = addButton(actionToolTip(QStringLiteral("togglethumbnailbar")), true);
+    fileInfoButton = addButton(actionToolTip(QStringLiteral("togglefileinfopanel")), true);
+    trashButton = addButton(actionToolTip(QStringLiteral("delete")), false);
+    toolbarLayout->addStretch(1);
+
+    connect(openButton, &QToolButton::clicked, this, [this]() { qvApp->pickFile(this); });
+    connect(rotateRightButton, &QToolButton::clicked, this, &MainWindow::rotateRight);
+    connect(thumbnailBarButton, &QToolButton::clicked, this,
+            &MainWindow::toggleThumbnailBarVisible);
+    connect(fileInfoButton, &QToolButton::clicked, this, &MainWindow::toggleFileInfoPanelVisible);
+    connect(trashButton, &QToolButton::clicked, this, [this]() { askDeleteFile(false, true); });
+
+    imageToolbar->setStyleSheet(QStringLiteral(
+            "QToolButton { border: none; border-radius: 5px; background: transparent; padding: 4px; }"
+            "QToolButton:hover { background: rgba(128, 128, 128, 50); }"
+            "QToolButton:pressed { background: rgba(128, 128, 128, 80); }"
+            "QToolButton:checked { background: rgba(128, 128, 128, 90); }"
+            "QToolButton:checked:hover { background: rgba(128, 128, 128, 120); }"));
+
+    imageColumnLayout->addWidget(imageToolbar);
+    imageColumnLayout->addWidget(graphicsView, 1);
+}
+
+void MainWindow::updateImageToolbar()
+{
+    if (!imageToolbar)
+        return;
+
+    const bool fullscreen = windowState().testFlag(Qt::WindowFullScreen);
+    imageToolbar->setVisible(!fullscreen);
+    imageColumnLayout->setContentsMargins(0, fullscreen ? 0 : getTitlebarOverlap(), 0, 0);
+
+    const qreal ratio = devicePixelRatioF();
+    const auto icon = [ratio](ushort codePoint) {
+        return qvApp->iconFromFont(QStringLiteral("Material Icons Outlined"), QChar(codePoint),
+                                   kImageToolbarIconSize, ratio);
+    };
+    openButton->setIcon(icon(0xe2c8));
+    rotateRightButton->setIcon(icon(0xe41a));
+    thumbnailBarButton->setIcon(icon(0xe413));
+    fileInfoButton->setIcon(icon(0xe88e));
+    trashButton->setIcon(icon(0xe872));
+
+    thumbnailBarButton->setChecked(qvGetSettingInt(ThumbnailBarPosition) != 0);
+    fileInfoButton->setChecked(qvGetSettingInt(FileInfoPanelPosition) != 0);
+
+    const bool hasImage = getCurrentFileDetails().isPixmapLoaded;
+    rotateRightButton->setEnabled(hasImage);
+    trashButton->setEnabled(hasImage);
+
+    const QColor background = customBackgroundColor.isValid()
+            ? customBackgroundColor
+            : palette().color(QPalette::Window);
+    QPalette toolbarPalette = imageToolbar->palette();
+    toolbarPalette.setColor(QPalette::Window, background);
+    imageToolbar->setPalette(toolbarPalette);
+    imageToolbar->setAutoFillBackground(true);
+}
+
 void MainWindow::updateThumbnailBarPosition()
 {
     const int thumbnailSetting = qvGetSettingInt(ThumbnailBarPosition);
@@ -1294,7 +1483,7 @@ void MainWindow::updateThumbnailBarPosition()
         auto *mainLayout = static_cast<QVBoxLayout *>(centralWidget()->layout());
 
         if (imageRowLayout) {
-            imageRowLayout->removeWidget(graphicsView);
+            imageRowLayout->removeWidget(imageColumn);
             imageRowLayout->removeWidget(thumbnailBar);
             imageRowLayout->removeWidget(fileInfoPanel);
             mainLayout->removeItem(imageRowLayout);
@@ -1302,7 +1491,7 @@ void MainWindow::updateThumbnailBarPosition()
             imageRowLayout = nullptr;
         }
 
-        mainLayout->removeWidget(graphicsView);
+        mainLayout->removeWidget(imageColumn);
         mainLayout->removeWidget(thumbnailBar);
         mainLayout->removeWidget(fileInfoPanel);
 
@@ -1322,12 +1511,12 @@ void MainWindow::updateThumbnailBarPosition()
             imageRowLayout->setSpacing(0);
             if (thumbnailOnLeft)
                 imageRowLayout->addWidget(thumbnailBar);
-            imageRowLayout->addWidget(graphicsView, 1);
+            imageRowLayout->addWidget(imageColumn, 1);
             if (infoOnRight)
                 imageRowLayout->addWidget(fileInfoPanel);
             mainLayout->insertLayout(1, imageRowLayout);
         } else {
-            mainLayout->insertWidget(1, graphicsView);
+            mainLayout->insertWidget(1, imageColumn);
         }
 
         if (infoPosition == static_cast<int>(QVFileInfoPanel::Position::Bottom))
@@ -1348,4 +1537,5 @@ void MainWindow::updateThumbnailBarPosition()
                                                                                : 0);
     thumbnailBar->setVisible(thumbnailPosition != 0);
     fileInfoPanel->setVisible(infoPosition != 0);
+    updateImageToolbar();
 }

@@ -43,6 +43,7 @@ CMakeLists.txt.user*
 # Custom
 *.exe
 .vscode
+.cursor
 
 bin/*
 build/*

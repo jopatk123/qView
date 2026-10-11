@@ -13,6 +13,33 @@
 #include <QGestureEvent>
 #include <QScrollBar>
 
+namespace {
+
+// How many pixels of this view sit under the macOS titlebar. Zero once the view
+// itself starts below the titlebar, which is the case when a toolbar is above it.
+int titlebarOverlap(const QWidget *view, bool includeTransparent)
+{
+#ifdef COCOA_LOADED
+    QWindow *window = view->window() ? view->window()->windowHandle() : nullptr;
+    if (!window)
+        return 0;
+
+    const int titlebarHeight = includeTransparent ? QVCocoaFunctions::getTitlebarHeight(window)
+                                                  : QVCocoaFunctions::getObscuredHeight(window);
+    if (titlebarHeight <= 0)
+        return 0;
+
+    const int viewTop = view->mapTo(view->window(), QPoint(0, 0)).y();
+    return qMax(0, titlebarHeight - viewTop);
+#else
+    Q_UNUSED(view)
+    Q_UNUSED(includeTransparent)
+    return 0;
+#endif
+}
+
+} // namespace
+
 QVGraphicsView::QVGraphicsView(QWidget *parent) : QGraphicsView(parent)
 {
     // GraphicsView setup
@@ -153,8 +180,8 @@ void QVGraphicsView::mousePressEvent(QMouseEvent *event)
             && !windowState.testFlag(Qt::WindowMaximized)) {
 #ifdef COCOA_LOADED
             // Check if click is in titlebar region
-            int titlebarHeight = QVCocoaFunctions::getTitlebarHeight(window()->windowHandle());
-            if (event->pos().y() <= titlebarHeight) {
+            const int titlebarHeight = titlebarOverlap(this, true);
+            if (titlebarHeight > 0 && event->pos().y() <= titlebarHeight) {
                 if (!startWindowMove()) {
                     startFallbackWindowMove();
                 }
@@ -640,11 +667,7 @@ void QVGraphicsView::goToFile(const GoToFileMode &mode, int index)
 
 void QVGraphicsView::fitInViewMarginless(const QRectF &rect)
 {
-#ifdef COCOA_LOADED
-    int obscuredHeight = QVCocoaFunctions::getObscuredHeight(window()->windowHandle());
-#else
-    int obscuredHeight = 0;
-#endif
+    const int obscuredHeight = titlebarOverlap(this, false);
 
     // Set adjusted image size / bounding rect based on
     QSize adjustedImageSize = getCurrentFileDetails().loadedPixmapSize;
@@ -734,11 +757,7 @@ void QVGraphicsView::fitInViewMarginless(const QGraphicsItem *item)
 
 void QVGraphicsView::centerOn(const QPointF &pos)
 {
-#ifdef COCOA_LOADED
-    int obscuredHeight = QVCocoaFunctions::getObscuredHeight(window()->windowHandle());
-#else
-    int obscuredHeight = 0;
-#endif
+    const int obscuredHeight = titlebarOverlap(this, false);
 
     qreal width = viewport()->width();
     qreal height = viewport()->height() - obscuredHeight;
