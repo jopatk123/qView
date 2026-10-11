@@ -199,6 +199,16 @@
         <translation>翻转(&amp;F)</translation>
     </message>
     <message>
+        <location filename="../src/actionmanager.cpp" line="746"/>
+        <source>Hide Title&amp;bar</source>
+        <translation>隐藏标题栏(&amp;B)</translation>
+    </message>
+    <message>
+        <location filename="../src/actionmanager.cpp" line="757"/>
+        <source>&amp;Thumbnail Bar</source>
+        <translation>缩略图栏(&amp;T)</translation>
+    </message>
+    <message>
         <location filename="../src/actionmanager.cpp" line="763"/>
         <source>Enter F&amp;ull Screen</source>
         <translation>全屏(&amp;F)</translation>
@@ -1231,6 +1241,111 @@ No write permission or file is read-only.</source>
         <source>You must restart qView to change the language.</source>
         <translation>必须重新启动qView才能更改语言.</translation>
     </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="298"/>
+        <source>Hide titlebar</source>
+        <translation>隐藏标题栏</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="308"/>
+        <source>Force dark mode</source>
+        <translation>强制深色模式</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="335"/>
+        <source>Enable %1 + drag to move the window</source>
+        <translation>启用 %1 + 拖动来移动窗口</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="338"/>
+        <source>%1 + drag to move window</source>
+        <translation>%1 + 拖动移动窗口</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="348"/>
+        <source>Choose the position of the thumbnail bar, or hide it entirely</source>
+        <translation>选择缩略图栏的位置，或将其隐藏</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="351"/>
+        <source>Thumbnail bar:</source>
+        <translation>缩略图栏：</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="362"/>
+        <source>Hidden</source>
+        <translation>隐藏</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="367"/>
+        <source>Bottom</source>
+        <translation>底部</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="372"/>
+        <source>Left</source>
+        <translation>左侧</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="380"/>
+        <source>Choose the size of thumbnails in the thumbnail bar</source>
+        <translation>选择缩略图栏中缩略图的大小</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="383"/>
+        <source>Thumbnail size:</source>
+        <translation>缩略图大小：</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="394"/>
+        <source>Small</source>
+        <translation>小</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="399"/>
+        <source>Medium</source>
+        <translation>中</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="404"/>
+        <source>Large</source>
+        <translation>大</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="547"/>
+        <source>When enabled, the scrolling action zooms the image</source>
+        <translation>启用后，滚动操作会缩放图像</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="550"/>
+        <source>Scrolling behavior:</source>
+        <translation>滚动行为：</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="564"/>
+        <source>Zoom</source>
+        <translation>缩放</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="569"/>
+        <source>Auto</source>
+        <translation>自动</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="574"/>
+        <source>Scroll</source>
+        <translation>滚动</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="595"/>
+        <source>Use hardware fractional scroll wheel steps when zooming, or always zoom with distinct steps</source>
+        <translation>缩放时跟随触控板的连续滚动，或始终按固定步进缩放</translation>
+    </message>
+    <message>
+        <location filename="../src/qvoptionsdialog.ui" line="598"/>
+        <source>Fractional zooming</source>
+        <translation>连续缩放</translation>
+    </message>
 </context>
 <context>
     <name>QVRenameDialog</name>
@@ -1448,6 +1563,11 @@ No write permission or file is read-only.</source>
         <location filename="../src/shortcutmanager.cpp" line="96"/>
         <source>Full Screen</source>
         <translation>全屏</translation>
+    </message>
+    <message>
+        <location filename="../src/shortcutmanager.cpp" line="153"/>
+        <source>Thumbnail Bar</source>
+        <translation>缩略图栏</translation>
     </message>
     <message>
         <location filename="../src/shortcutmanager.cpp" line="108"/>

@@ -5,6 +5,7 @@
 #include <QLocale>
 #include <QCoreApplication>
 #include <QDir>
+#include <QLibraryInfo>
 #include <QMetaEnum>
 
 #include <QDebug>
@@ -74,27 +75,66 @@ SettingsManager::SettingsManager(QObject *parent) : QObject(parent)
 
 QString SettingsManager::getSystemLanguage() const
 {
-    auto entries = QDir(":/i18n/").entryList();
-    entries.prepend("qview_en.ts");
-    const auto centries = entries;
+    QStringList available;
+    available.append(QStringLiteral("en"));
+    const auto entries = QDir(":/i18n/").entryList();
+    for (auto entry : entries) {
+        if (!entry.startsWith(QLatin1String("qview_")) || !entry.endsWith(QLatin1String(".qm")))
+            continue;
+        entry.remove(0, 6);
+        entry.chop(3);
+        available.append(entry);
+    }
 
     const auto languages = QLocale::system().uiLanguages();
     for (auto language : languages) {
         language.replace('-', '_');
-        const auto countryless = language.left(2);
+        if (available.contains(language))
+            return language;
 
-        for (auto entry : centries) {
-            entry.remove(0, 6);
-            entry.remove(entry.length() - 3, 3);
+        // zh-Hans-CN is reported as zh_Hans_CN, while the catalog is qview_zh_Hans.
+        const auto parts = language.split('_');
+        if (parts.size() >= 2 && available.contains(parts.at(0) + '_' + parts.at(1)))
+            return parts.at(0) + '_' + parts.at(1);
 
-            if (entry == language)
-                return language;
-
-            if (entry == countryless)
-                return countryless;
+        if (parts.value(0) == QLatin1String("zh")) {
+            const bool traditional = language.contains(QLatin1String("Hant"))
+                    || language.contains(QLatin1String("TW"))
+                    || language.contains(QLatin1String("HK"))
+                    || language.contains(QLatin1String("MO"));
+            const QString preferred = traditional ? QStringLiteral("zh_Hant")
+                                                   : QStringLiteral("zh_Hans");
+            if (available.contains(preferred))
+                return preferred;
         }
+
+        if (!parts.isEmpty() && available.contains(parts.at(0)))
+            return parts.at(0);
     }
-    return "en";
+    return QStringLiteral("en");
+}
+
+static void installQtTranslation(const QString &lang)
+{
+    QString qtLang = lang;
+    if (lang == QLatin1String("zh_Hans") || lang == QLatin1String("zh"))
+        qtLang = QStringLiteral("zh_CN");
+    else if (lang == QLatin1String("zh_Hant"))
+        qtLang = QStringLiteral("zh_TW");
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    const QString path = QLibraryInfo::path(QLibraryInfo::TranslationsPath);
+#else
+    const QString path = QLibraryInfo::location(QLibraryInfo::TranslationsPath);
+#endif
+
+    auto *qtTranslator = new QTranslator(QCoreApplication::instance());
+    if (qtTranslator->load(QStringLiteral("qtbase_") + qtLang, path)
+        || qtTranslator->load(QStringLiteral("qt_") + qtLang, path)) {
+        QCoreApplication::installTranslator(qtTranslator);
+    } else {
+        delete qtTranslator;
+    }
 }
 
 bool SettingsManager::loadTranslation() const
@@ -106,12 +146,16 @@ bool SettingsManager::loadTranslation() const
     if (lang == "en")
         return true;
 
-    QTranslator *translator = new QTranslator();
+    auto *translator = new QTranslator(QCoreApplication::instance());
     bool success = translator->load("qview_" + lang + ".qm", QLatin1String(":/i18n"));
     if (success) {
         qInfo() << "Loaded translation" << lang;
         QCoreApplication::installTranslator(translator);
+    } else {
+        delete translator;
     }
+
+    installQtTranslation(lang);
     return success;
 }
 
