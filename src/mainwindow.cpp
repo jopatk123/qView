@@ -5,6 +5,7 @@
 #include "qvrenamedialog.h"
 #include "qvthumbnailbar.h"
 #include "qvfileinfopanel.h"
+#include "qvbatchcompressdialog.h"
 
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -1408,6 +1409,33 @@ void MainWindow::compressImage()
     dialog->open();
 }
 
+void MainWindow::batchCompress()
+{
+    QStringList files;
+    const QVImageCore::FileDetails &details = getCurrentFileDetails();
+    files.reserve(details.folderFileInfoList.size());
+    for (const QVImageCore::CompatibleFile &file : details.folderFileInfoList)
+        files.append(file.absoluteFilePath);
+
+    int longestEdge = 0;
+    if (graphicsView->canEditStill()) {
+        const QSize size = graphicsView->getLoadedPixmap().size();
+        longestEdge = qMax(size.width(), size.height());
+    }
+
+    auto *dialog = new QVBatchCompressDialog(files, details.fileInfo.absoluteFilePath(),
+                                             graphicsView->isImageModified(), longestEdge, this);
+    connect(dialog, &QVBatchCompressDialog::originalsOverwritten, this,
+            [this](const QStringList &paths) {
+                if (paths.isEmpty())
+                    return;
+                thumbnailBar->refreshThumbnails();
+                if (paths.contains(getCurrentFileDetails().fileInfo.absoluteFilePath()))
+                    reloadFile();
+            });
+    dialog->open();
+}
+
 void MainWindow::firstFile()
 {
     graphicsView->goToFile(QVGraphicsView::GoToFileMode::first);
@@ -1685,6 +1713,11 @@ void MainWindow::setupImageToolbar()
     toolbarLayout->addWidget(compressResultLabel);
     cropButton = addButton(tr("Crop"), true);
     compressButton = addButton(tr("Compress"), false);
+    auto *compressMenu = new QMenu(compressButton);
+    compressCurrentAction = compressMenu->addAction(tr("Compress this image"));
+    auto *batchCompressAction = compressMenu->addAction(tr("Batch compress…"));
+    compressButton->setMenu(compressMenu);
+    compressButton->setPopupMode(QToolButton::InstantPopup);
     rotateRightButton = addButton(actionToolTip(QStringLiteral("rotateright")), false);
     thumbnailBarButton = addButton(actionToolTip(QStringLiteral("togglethumbnailbar")), true);
     fileInfoButton = addButton(actionToolTip(QStringLiteral("togglefileinfopanel")), true);
@@ -1696,13 +1729,15 @@ void MainWindow::setupImageToolbar()
     saveButton->setObjectName(QStringLiteral("saveImageButton"));
     saveButton->setVisible(false);
     cropButton->setEnabled(false);
-    compressButton->setEnabled(false);
+    compressButton->setEnabled(true);
 
     connect(openButton, &QToolButton::clicked, this, [this]() { qvApp->pickFile(this); });
     connect(restoreButton, &QToolButton::clicked, this, &MainWindow::revertImage);
     connect(saveButton, &QToolButton::clicked, this, &MainWindow::saveImage);
     connect(cropButton, &QToolButton::clicked, this, &MainWindow::cropImage);
     connect(compressButton, &QToolButton::clicked, this, &MainWindow::compressImage);
+    connect(compressCurrentAction, &QAction::triggered, this, &MainWindow::compressImage);
+    connect(batchCompressAction, &QAction::triggered, this, &MainWindow::batchCompress);
     connect(rotateRightButton, &QToolButton::clicked, this, &MainWindow::rotateRight);
     connect(thumbnailBarButton, &QToolButton::clicked, this,
             &MainWindow::toggleThumbnailBarVisible);
@@ -1762,7 +1797,11 @@ void MainWindow::updateImageToolbar()
     rotateRightButton->setEnabled(hasImage);
     trashButton->setEnabled(hasImage);
     cropButton->setEnabled(canEdit);
-    compressButton->setEnabled(canEdit);
+    compressButton->setEnabled(true);
+    compressButton->setPopupMode(canEdit ? QToolButton::MenuButtonPopup : QToolButton::InstantPopup);
+    if (compressCurrentAction)
+        compressCurrentAction->setEnabled(canEdit);
+    compressButton->setToolTip(canEdit ? tr("Compress") : tr("Batch compress…"));
     cropButton->setChecked(graphicsView->isCropping());
     cropButton->setToolTip(graphicsView->isCropping() ? tr("Drag to select the area to keep.")
                                                       : tr("Crop"));

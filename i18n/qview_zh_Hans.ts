@@ -604,6 +604,14 @@ No write permission or file is read-only.</source>
         <source>%1 → %2, increased %3 (%4%%)</source>
         <translation>%1 → %2，增加 %3（%4%%）</translation>
     </message>
+    <message>
+        <source>Compress this image</source>
+        <translation>压缩当前图片</translation>
+    </message>
+    <message>
+        <source>Batch compress…</source>
+        <translation>批量压缩…</translation>
+    </message>
 </context>
 <context>
     <name>OpenWith</name>
@@ -1854,6 +1862,199 @@ You can reenable them in the options dialog.</source>
     <message>
         <source>Could not write the image.</source>
         <translation>无法写入图片。</translation>
+    </message>
+</context>
+<context>
+    <name>QVBatchCompressDialog</name>
+    <message>
+        <source>Batch compress</source>
+        <translation>批量压缩</translation>
+    </message>
+    <message>
+        <source>Files</source>
+        <translation>文件</translation>
+    </message>
+    <message>
+        <source>Add files…</source>
+        <translation>添加文件…</translation>
+    </message>
+    <message>
+        <source>Add files</source>
+        <translation>添加文件</translation>
+    </message>
+    <message>
+        <source>All</source>
+        <translation>全选</translation>
+    </message>
+    <message>
+        <source>None</source>
+        <translation>全不选</translation>
+    </message>
+    <message>
+        <source>%1 of %2 selected</source>
+        <translation>已选择 %1 / %2</translation>
+    </message>
+    <message>
+        <source>Animated images are skipped.</source>
+        <translation>动图会被跳过。</translation>
+    </message>
+    <message>
+        <source>Preview</source>
+        <translation>预览</translation>
+    </message>
+    <message>
+        <source>Select an image to preview.</source>
+        <translation>选择一张图片进行预览。</translation>
+    </message>
+    <message>
+        <source>Calculating…</source>
+        <translation>正在计算…</translation>
+    </message>
+    <message>
+        <source>This animated image will be skipped.</source>
+        <translation>这张动图会被跳过。</translation>
+    </message>
+    <message>
+        <source>Could not read this image.</source>
+        <translation>无法读取这张图片。</translation>
+    </message>
+    <message>
+        <source>Could not compress this image.</source>
+        <translation>无法压缩这张图片。</translation>
+    </message>
+    <message>
+        <source>%1 x %2
+%3</source>
+        <translation>%1 x %2
+%3</translation>
+    </message>
+    <message>
+        <source>Quality</source>
+        <translation>质量</translation>
+    </message>
+    <message>
+        <source>Size</source>
+        <translation>尺寸</translation>
+    </message>
+    <message>
+        <source>Percent</source>
+        <translation>百分比</translation>
+    </message>
+    <message>
+        <source>Longest edge</source>
+        <translation>最长边</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation>输出</translation>
+    </message>
+    <message>
+        <source>Save copies into a "compressed" folder</source>
+        <translation>保存副本到“compressed”文件夹</translation>
+    </message>
+    <message>
+        <source>Overwrite original files</source>
+        <translation>覆盖原文件</translation>
+    </message>
+    <message>
+        <source>Copies are written next to each original, in a folder named "compressed".</source>
+        <translation>副本会写到每张原图旁边、名为“compressed”的文件夹里。</translation>
+    </message>
+    <message>
+        <source>Original files are replaced. This cannot be undone.</source>
+        <translation>原文件会被替换，且不能撤销。</translation>
+    </message>
+    <message>
+        <source>Start</source>
+        <translation>开始</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>取消</translation>
+    </message>
+    <message>
+        <source>This image has unsaved edits. Batch compress reads the file on disk and will not include them.
+
+%1</source>
+        <translation>当前图片有未保存的修改。批量压缩读取的是磁盘上的文件，不会包含这些修改。
+
+%1</translation>
+    </message>
+    <message>
+        <source>Overwriting this file will discard those edits.</source>
+        <translation>如果覆盖这个文件，未保存的修改会丢失。</translation>
+    </message>
+    <message>
+        <source>The new file will be made from the copy on disk.</source>
+        <translation>新文件会按磁盘上的内容生成。</translation>
+    </message>
+    <message>
+        <source>Overwrite %1 original files? This cannot be undone.</source>
+        <translation>要覆盖 %1 个原文件吗？此操作不能撤销。</translation>
+    </message>
+    <message>
+        <source>Starting…</source>
+        <translation>正在开始…</translation>
+    </message>
+    <message>
+        <source>Compressing %1/%2: %3</source>
+        <translation>正在压缩 %1/%2：%3</translation>
+    </message>
+    <message>
+        <source>Cancelled. %1 compressed, %2 skipped, %3 failed, %4 not processed.</source>
+        <translation>已取消：成功 %1，跳过 %2，失败 %3，未处理 %4。</translation>
+    </message>
+    <message>
+        <source>Finished. %1 compressed, %2 skipped, %3 failed.</source>
+        <translation>完成：成功 %1，跳过 %2，失败 %3。</translation>
+    </message>
+    <message>
+        <source>%1 animated images were skipped.</source>
+        <translation>已跳过 %1 张动图。</translation>
+    </message>
+    <message>
+        <source>Copies were saved in a "compressed" folder next to each file.</source>
+        <translation>副本已保存到每张图片旁边的“compressed”文件夹。</translation>
+    </message>
+    <message>
+        <source>%1: %2</source>
+        <translation>%1：%2</translation>
+    </message>
+    <message>
+        <source>And %1 more failed.</source>
+        <translation>另有 %1 个失败。</translation>
+    </message>
+    <message>
+        <source>Could not read the image.</source>
+        <translation>无法读取图片。</translation>
+    </message>
+    <message>
+        <source>Could not compress the image.</source>
+        <translation>无法压缩图片。</translation>
+    </message>
+    <message>
+        <source>Could not create the compressed folder.</source>
+        <translation>无法创建 compressed 文件夹。</translation>
+    </message>
+    <message>
+        <source>Could not write the image.</source>
+        <translation>无法写入图片。</translation>
+    </message>
+    <message>
+        <source>Compressed size: %1</source>
+        <translation>压缩后大小：%1</translation>
+    </message>
+    <message>
+        <source>%1 → %2, same size</source>
+        <translation>%1 → %2，大小不变</translation>
+    </message>
+    <message>
+        <source>%1 → %2, reduced %3 (%4%%)</source>
+        <translation>%1 → %2，减少 %3（%4%%）</translation>
+    </message>
+    <message>
+        <source>%1 → %2, increased %3 (%4%%)</source>
+        <translation>%1 → %2，增加 %3（%4%%）</translation>
     </message>
 </context>
 </TS>

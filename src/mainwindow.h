@@ -15,6 +15,7 @@ namespace Ui {
 class MainWindow;
 }
 
+class QAction;
 class QHBoxLayout;
 class QLabel;
 class QToolButton;
@@ -108,6 +109,8 @@ public:
 
     void compressImage();
 
+    void batchCompress();
+
     void firstFile();
 
     void previousFile();
@@ -196,6 +199,7 @@ private:
     QLabel *compressResultLabel = nullptr;
     QToolButton *cropButton = nullptr;
     QToolButton *compressButton = nullptr;
+    QAction *compressCurrentAction = nullptr;
     QToolButton *rotateRightButton = nullptr;
     QToolButton *thumbnailBarButton = nullptr;
     QToolButton *fileInfoButton = nullptr;
