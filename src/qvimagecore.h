@@ -116,9 +116,12 @@ public:
         QImage image;
         QByteArray encoded;
     };
-    // Scales and encodes without touching the image on screen.
+    // Scales, sharpens reductions, and encodes without touching the image on screen.
+    // roundTrip decodes the encoded bytes so the preview matches the file.
+    // Search passes false and uses only CompressionOutput::encoded.
     static CompressionOutput encodeCompressed(const QImage &source, const QSize &targetSize,
-                                              const QByteArray &format, int quality);
+                                              const QByteArray &format, int quality,
+                                              bool roundTrip = true);
     // Resizes to targetSize and remembers the encoded bytes for the later overwrite.
     bool compressImage(const QSize &targetSize, int quality);
     // Applies an encode result already produced for the preview.

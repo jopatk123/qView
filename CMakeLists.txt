@@ -57,6 +57,7 @@ set(PROJECT_SOURCES
     src/qvaboutdialog.cpp
     src/qvrenamedialog.cpp
     src/qvbatchcompressdialog.cpp
+    src/qvcompress.cpp
     src/qvwelcomedialog.cpp
     src/qvinfodialog.cpp
     src/qvfileinfopanel.cpp
@@ -79,6 +80,7 @@ set(PROJECT_HEADERS
     src/qvaboutdialog.h
     src/qvrenamedialog.h
     src/qvbatchcompressdialog.h
+    src/qvcompress.h
     src/qvwelcomedialog.h
     src/qvinfodialog.h
     src/qvfileinfopanel.h
@@ -148,6 +150,20 @@ endif()
 add_executable(${PROJECT_NAME} ${EXECUTABLE_TYPE} ${PROJECT_SOURCES} ${PROJECT_HEADERS} ${PROJECT_FORMS} ${PROJECT_RESOURCES})
 
 target_link_libraries(${PROJECT_NAME} PRIVATE Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Svg)
+
+find_package(JPEG QUIET)
+if(JPEG_FOUND)
+    if(TARGET JPEG::JPEG)
+        target_link_libraries(${PROJECT_NAME} PRIVATE JPEG::JPEG)
+    else()
+        target_include_directories(${PROJECT_NAME} PRIVATE ${JPEG_INCLUDE_DIR})
+        target_link_libraries(${PROJECT_NAME} PRIVATE ${JPEG_LIBRARIES})
+    endif()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE QV_HAVE_LIBJPEG)
+    message(STATUS "libjpeg found: high-quality JPEG compression keeps full chroma")
+else()
+    message(STATUS "libjpeg not found: JPEG compression uses Qt's encoder")
+endif()
 
 # Set the executable name to lowercase on Linux
 if(UNIX AND NOT APPLE)

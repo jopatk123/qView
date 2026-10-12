@@ -15,6 +15,7 @@ set(TEST_SOURCES
     ../src/qvaboutdialog.cpp
     ../src/qvrenamedialog.cpp
     ../src/qvbatchcompressdialog.cpp
+    ../src/qvcompress.cpp
     ../src/qvwelcomedialog.cpp
     ../src/qvinfodialog.cpp
     ../src/qvfileinfopanel.cpp
@@ -87,6 +88,16 @@ target_compile_definitions(actionmanagertests PRIVATE
 
 if(QV_DISABLE_ONLINE_VERSION_CHECK)
     target_compile_definitions(actionmanagertests PRIVATE QV_DISABLE_ONLINE_VERSION_CHECK)
+endif()
+
+if(JPEG_FOUND)
+    if(TARGET JPEG::JPEG)
+        target_link_libraries(actionmanagertests PRIVATE JPEG::JPEG)
+    else()
+        target_include_directories(actionmanagertests PRIVATE ${JPEG_INCLUDE_DIR})
+        target_link_libraries(actionmanagertests PRIVATE ${JPEG_LIBRARIES})
+    endif()
+    target_compile_definitions(actionmanagertests PRIVATE QV_HAVE_LIBJPEG)
 endif()
 
 # Add the test

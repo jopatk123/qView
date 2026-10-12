@@ -43,6 +43,10 @@ namespace {
 
 const int kMaxFailureLines = 8;
 const int kLongestEdgeLimit = 16384;
+const int kFileSizeMode = 2;
+const int kMaxFitQuality = 92;
+const int kMinFitEdge = 16;
+const int kFileSizeMaxKb = 102400;
 
 // macOS draws item-view checkboxes outside the row, so only the first one stays visible.
 class FileCheckDelegate : public QStyledItemDelegate
@@ -186,13 +190,103 @@ QSize targetSizeFor(const QSize &source, int sizeMode, int sizeValue)
     return target;
 }
 
+QSize sizeForLongestEdge(const QSize &source, int edge)
+{
+    QSize target = source;
+    const int longest = qMax(source.width(), source.height());
+    if (longest > edge && edge > 0)
+        target.scale(edge, edge, Qt::KeepAspectRatio);
+    target.setWidth(qMax(1, target.width()));
+    target.setHeight(qMax(1, target.height()));
+    return target;
+}
+
+bool fitsLimit(const QByteArray &encoded, qint64 limitBytes)
+{
+    return !encoded.isEmpty() && qint64(encoded.size()) <= limitBytes;
+}
+
+bool isCancelled(const std::atomic_bool *cancel)
+{
+    return cancel && cancel->load();
+}
+
+bool isLossyFormat(const QByteArray &format)
+{
+    const QByteArray name = format.toLower();
+    return name == "jpeg" || name == "jpg" || name == "webp" || name == "heic" || name == "heif"
+            || name == "avif" || name == "jxl";
+}
+
+// Highest quality in [low, high] whose encoded bytes fit. Keeps the previous fit
+// when a higher quality does not.
+bool raiseQualityToFit(const QImage &image, const QSize &target, const QByteArray &format,
+                       qint64 limitBytes, int low, int high, const std::atomic_bool *cancel,
+                       int *quality, QByteArray *encoded)
+{
+    bool found = false;
+    while (low <= high) {
+        if (isCancelled(cancel))
+            return false;
+        const int mid = (low + high) / 2;
+        const QVImageCore::CompressionOutput output =
+                QVImageCore::encodeCompressed(image, target, format, mid, false);
+        if (fitsLimit(output.encoded, limitBytes)) {
+            *quality = mid;
+            *encoded = output.encoded;
+            found = true;
+            low = mid + 1;
+        } else {
+            high = mid - 1;
+        }
+    }
+    return found;
+}
+
+// Largest longest-edge at quality 1 that fits. Quality is raised afterwards for lossy formats.
+bool shrinkToFit(const QImage &image, const QByteArray &format, qint64 limitBytes,
+                 const std::atomic_bool *cancel, QSize *target, int *quality, QByteArray *encoded)
+{
+    const int longest = qMax(image.width(), image.height());
+    if (longest <= kMinFitEdge)
+        return false;
+
+    int low = kMinFitEdge;
+    int high = longest - 1;
+    int bestEdge = -1;
+    while (low <= high) {
+        if (isCancelled(cancel))
+            return false;
+        const int mid = (low + high) / 2;
+        const QSize candidate = sizeForLongestEdge(image.size(), mid);
+        const QVImageCore::CompressionOutput output =
+                QVImageCore::encodeCompressed(image, candidate, format, 1, false);
+        if (fitsLimit(output.encoded, limitBytes)) {
+            bestEdge = mid;
+            *target = candidate;
+            *quality = 1;
+            *encoded = output.encoded;
+            low = mid + 1;
+        } else {
+            high = mid - 1;
+        }
+    }
+    if (bestEdge < 0)
+        return false;
+    if (isLossyFormat(format))
+        raiseQualityToFit(image, *target, format, limitBytes, 2, kMaxFitQuality, cancel, quality,
+                          encoded);
+    return !isCancelled(cancel) && fitsLimit(*encoded, limitBytes);
+}
+
 QString copyDestination(const QString &sourcePath)
 {
     const QFileInfo info(sourcePath);
     return QDir(info.absolutePath()).filePath(QStringLiteral("compressed/") + info.fileName());
 }
 
-QVBatchEncoded encodeFile(const QString &path, int quality, int sizeMode, int sizeValue)
+QVBatchEncoded encodeFile(const QString &path, int quality, int sizeMode, int sizeValue,
+                          const std::atomic_bool *cancel, bool previewImage)
 {
     QVBatchEncoded result;
     const QFileInfo info(path);
@@ -217,22 +311,82 @@ QVBatchEncoded encodeFile(const QString &path, int quality, int sizeMode, int si
         return result;
     }
 
+    if (sizeMode == kFileSizeMode && info.size() <= qint64(qMax(1, sizeValue)) * 1024) {
+        result.unchanged = true;
+        if (previewImage) {
+            result.image = reader.read();
+            if (result.image.isNull()) {
+                result.unchanged = false;
+                result.error = QStringLiteral("read");
+            }
+        }
+        return result;
+    }
+
+    if (isCancelled(cancel)) {
+        result.error = QStringLiteral("cancelled");
+        return result;
+    }
+
     QImage image = reader.read();
     if (image.isNull()) {
         result.error = QStringLiteral("read");
         return result;
     }
 
-    const QSize target = targetSizeFor(image.size(), sizeMode, sizeValue);
-    const QVImageCore::CompressionOutput output =
-            QVImageCore::encodeCompressed(image, target, format, quality);
-    if (output.encoded.isEmpty() || output.image.isNull()) {
-        result.error = QStringLiteral("encode");
+    QSize target = image.size();
+    QByteArray encoded;
+    int usedQuality = quality;
+    if (sizeMode == kFileSizeMode) {
+        const qint64 limitBytes = qint64(qMax(1, sizeValue)) * 1024;
+        const bool lossy = isLossyFormat(format);
+        bool fitted = false;
+        if (lossy) {
+            fitted = raiseQualityToFit(image, image.size(), format, limitBytes, 1, kMaxFitQuality,
+                                       cancel, &usedQuality, &encoded);
+        } else {
+            const QVImageCore::CompressionOutput output =
+                    QVImageCore::encodeCompressed(image, image.size(), format, 1, false);
+            if (fitsLimit(output.encoded, limitBytes)) {
+                fitted = true;
+                usedQuality = 1;
+                encoded = output.encoded;
+            }
+        }
+        if (isCancelled(cancel)) {
+            result.error = QStringLiteral("cancelled");
+            return result;
+        }
+        if (!fitted)
+            fitted = shrinkToFit(image, format, limitBytes, cancel, &target, &usedQuality, &encoded);
+        if (isCancelled(cancel)) {
+            result.error = QStringLiteral("cancelled");
+            return result;
+        }
+        if (!fitted || !fitsLimit(encoded, limitBytes)) {
+            result.error = QStringLiteral("limit");
+            return result;
+        }
+        Q_UNUSED(usedQuality)
+    } else {
+        target = targetSizeFor(image.size(), sizeMode, sizeValue);
+        const QVImageCore::CompressionOutput output =
+                QVImageCore::encodeCompressed(image, target, format, quality);
+        if (output.encoded.isEmpty() || output.image.isNull()) {
+            result.error = QStringLiteral("encode");
+            return result;
+        }
+        result.image = output.image;
+        result.encoded = output.encoded;
         return result;
     }
 
-    result.image = output.image;
-    result.encoded = output.encoded;
+    result.encoded = encoded;
+    result.image = QImage::fromData(encoded, format);
+    if (result.image.isNull() || result.encoded.isEmpty()) {
+        result.error = QStringLiteral("encode");
+        return result;
+    }
     return result;
 }
 
@@ -292,7 +446,18 @@ public:
             const QString name = QFileInfo(path).fileName();
             report(i, total, name);
 
-            const QVBatchEncoded encoded = encodeFile(path, quality, sizeMode, sizeValue);
+            const QVBatchEncoded encoded =
+                    encodeFile(path, quality, sizeMode, sizeValue, cancel.get(), false);
+            if (encoded.error == QLatin1String("cancelled")) {
+                result.cancelled = true;
+                result.remaining = total - i;
+                break;
+            }
+            if (encoded.unchanged) {
+                ++result.skipped;
+                ++result.skippedUnderLimit;
+                continue;
+            }
             if (encoded.error == QLatin1String("animated")) {
                 ++result.skipped;
                 ++result.skippedAnimated;
@@ -412,6 +577,7 @@ QVBatchCompressDialog::QVBatchCompressDialog(const QStringList &folderFiles,
     sizeMode = new QComboBox(this);
     sizeMode->addItem(tr("Percent"));
     sizeMode->addItem(tr("Longest edge"));
+    sizeMode->addItem(tr("File size"));
     sizeValue = new QSpinBox(this);
     sizeValue->setRange(1, 100);
     sizeValue->setValue(100);
@@ -430,6 +596,14 @@ QVBatchCompressDialog::QVBatchCompressDialog(const QStringList &folderFiles,
     outputNote = new QLabel(this);
     outputNote->setWordWrap(true);
     layout->addWidget(outputNote);
+
+    limitNote = new QLabel(
+            tr("Images at or below this size are left unchanged. Larger images are compressed "
+               "until they fit, and scaled down if lowering quality is not enough."),
+            this);
+    limitNote->setWordWrap(true);
+    limitNote->setVisible(false);
+    layout->addWidget(limitNote);
 
     progressBar = new QProgressBar(this);
     progressBar->setTextVisible(false);
@@ -456,12 +630,24 @@ QVBatchCompressDialog::QVBatchCompressDialog(const QStringList &folderFiles,
             [this](int) { schedulePreview(); });
     connect(sizeMode, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
         const QSignalBlocker blocker(sizeValue);
+        const bool fileSize = index == kFileSizeMode;
+        qualitySlider->setEnabled(!fileSize);
+        qualityValue->setEnabled(!fileSize);
+        if (limitNote)
+            limitNote->setVisible(fileSize);
         if (index == 0) {
             sizeValue->setRange(1, 100);
+            sizeValue->setSingleStep(1);
             sizeValue->setSuffix(QStringLiteral("%"));
             sizeValue->setValue(100);
+        } else if (index == kFileSizeMode) {
+            sizeValue->setRange(1, kFileSizeMaxKb);
+            sizeValue->setSingleStep(50);
+            sizeValue->setSuffix(QStringLiteral(" KB"));
+            sizeValue->setValue(500);
         } else {
             sizeValue->setRange(1, kLongestEdgeLimit);
+            sizeValue->setSingleStep(1);
             sizeValue->setSuffix(QStringLiteral(" px"));
             const int edge = this->currentLongestEdge > 0 ? this->currentLongestEdge : 2560;
             sizeValue->setValue(qBound(1, edge, kLongestEdgeLimit));
@@ -710,16 +896,45 @@ void QVBatchCompressDialog::launchPreview()
     const int mode = sizeMode->currentIndex();
     const int value = sizeValue->value();
     previewWatcher->setFuture(QtConcurrent::run([path, quality, mode, value]() {
-        return encodeFile(path, quality, mode, value);
+        return encodeFile(path, quality, mode, value, nullptr, true);
     }));
 }
 
 void QVBatchCompressDialog::showPreview(const QVBatchEncoded &encoded)
 {
     previewCaption->setText(encoded.fileName);
+    if (encoded.unchanged) {
+        const QString summary = tr("Already %1, within the size limit. It will not be changed.")
+                                        .arg(formatByteCount(encoded.before));
+        if (encoded.image.isNull()) {
+            preview->setPixmap(QPixmap());
+            preview->setText(tr("Left unchanged."));
+            previewSummary->setText(summary);
+            return;
+        }
+        const qreal dpr = preview->devicePixelRatioF();
+        QPixmap pix = QPixmap::fromImage(encoded.image);
+        const QSize maxPx(qRound(preview->width() * dpr), qRound(preview->height() * dpr));
+        if (pix.width() > maxPx.width() || pix.height() > maxPx.height())
+            pix = pix.scaled(maxPx, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        pix.setDevicePixelRatio(dpr);
+        preview->setText(QString());
+        preview->setPixmap(pix);
+        previewSummary->setText(tr("%1 x %2\n%3")
+                                        .arg(encoded.image.width())
+                                        .arg(encoded.image.height())
+                                        .arg(summary));
+        return;
+    }
     if (encoded.error == QLatin1String("animated")) {
         preview->setPixmap(QPixmap());
         preview->setText(tr("This animated image will be skipped."));
+        previewSummary->clear();
+        return;
+    }
+    if (encoded.error == QLatin1String("limit")) {
+        preview->setPixmap(QPixmap());
+        preview->setText(tr("Could not get this image under the size limit."));
         previewSummary->clear();
         return;
     }
@@ -764,7 +979,13 @@ void QVBatchCompressDialog::startOrCancel()
         return;
 
     const bool overwrite = outputMode->currentIndex() == 1;
-    if (currentModified && !currentPath.isEmpty() && paths.contains(currentPath)) {
+    const bool fileSize = sizeMode->currentIndex() == kFileSizeMode;
+    const qint64 limitBytes = qint64(qMax(1, sizeValue->value())) * 1024;
+    const auto withinLimit = [fileSize, limitBytes](const QString &path) {
+        return fileSize && QFileInfo(path).size() <= limitBytes;
+    };
+    if (currentModified && !currentPath.isEmpty() && paths.contains(currentPath)
+        && !withinLimit(currentPath)) {
         const QString detail = overwrite ? tr("Overwriting this file will discard those edits.")
                                          : tr("The new file will be made from the copy on disk.");
         const auto answer = QMessageBox::question(
@@ -777,12 +998,22 @@ void QVBatchCompressDialog::startOrCancel()
             return;
     }
     if (overwrite) {
-        const auto answer = QMessageBox::warning(
-                this, tr("Batch compress"),
-                tr("Overwrite %1 original files? This cannot be undone.").arg(paths.size()),
-                QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-        if (answer != QMessageBox::Yes)
-            return;
+        int overwriteCount = paths.size();
+        if (fileSize) {
+            overwriteCount = 0;
+            for (const QString &path : paths) {
+                if (!withinLimit(path))
+                    ++overwriteCount;
+            }
+        }
+        if (overwriteCount > 0) {
+            const auto answer = QMessageBox::warning(
+                    this, tr("Batch compress"),
+                    tr("Overwrite %1 original files? This cannot be undone.").arg(overwriteCount),
+                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+            if (answer != QMessageBox::Yes)
+                return;
+        }
     }
 
     lastOverwrite = overwrite;
@@ -840,7 +1071,8 @@ void QVBatchCompressDialog::reportProgress(int done, int total, const QString &f
 void QVBatchCompressDialog::setInputsEnabled(bool enabled)
 {
     fileList->setEnabled(enabled);
-    qualitySlider->setEnabled(enabled);
+    qualitySlider->setEnabled(enabled && sizeMode->currentIndex() != kFileSizeMode);
+    qualityValue->setEnabled(enabled && sizeMode->currentIndex() != kFileSizeMode);
     sizeMode->setEnabled(enabled);
     sizeValue->setEnabled(enabled);
     outputMode->setEnabled(enabled);
@@ -879,6 +1111,10 @@ void QVBatchCompressDialog::showResult(const QVBatchJobResult &result)
     }
     if (result.skippedAnimated > 0)
         lines.append(tr("%1 animated images were skipped.").arg(result.skippedAnimated));
+    if (result.skippedUnderLimit > 0) {
+        lines.append(tr("%1 images were already within the size limit and were left unchanged.")
+                             .arg(result.skippedUnderLimit));
+    }
     if (result.succeeded > 0)
         lines.append(compressionSummary(result.before, result.after));
     if (!lastOverwrite && result.succeeded > 0) {
@@ -909,6 +1145,8 @@ QString QVBatchCompressDialog::describeError(const QString &code) const
         return tr("Could not read the image.");
     if (code == QLatin1String("encode"))
         return tr("Could not compress the image.");
+    if (code == QLatin1String("limit"))
+        return tr("Could not get this image under the size limit.");
     if (code == QLatin1String("mkdir"))
         return tr("Could not create the compressed folder.");
     if (code == QLatin1String("write"))

@@ -1945,6 +1945,14 @@ You can reenable them in the options dialog.</source>
         <translation>最长边</translation>
     </message>
     <message>
+        <source>File size</source>
+        <translation>文件大小</translation>
+    </message>
+    <message>
+        <source>Images at or below this size are left unchanged. Larger images are compressed until they fit, and scaled down if lowering quality is not enough.</source>
+        <translation>小于或等于这个大小的图片保持原样。更大的图片会压缩到这个大小以内；只降质量不够时会再缩小尺寸。</translation>
+    </message>
+    <message>
         <source>Output</source>
         <translation>输出</translation>
     </message>
@@ -2011,6 +2019,22 @@ You can reenable them in the options dialog.</source>
     <message>
         <source>%1 animated images were skipped.</source>
         <translation>已跳过 %1 张动图。</translation>
+    </message>
+    <message>
+        <source>%1 images were already within the size limit and were left unchanged.</source>
+        <translation>%1 张图片未超过大小限制，已保持原样。</translation>
+    </message>
+    <message>
+        <source>Already %1, within the size limit. It will not be changed.</source>
+        <translation>当前 %1，未超过大小限制，不会改动。</translation>
+    </message>
+    <message>
+        <source>Left unchanged.</source>
+        <translation>保持原样。</translation>
+    </message>
+    <message>
+        <source>Could not get this image under the size limit.</source>
+        <translation>无法把这张图片压到大小限制以内。</translation>
     </message>
     <message>
         <source>Copies were saved in a "compressed" folder next to each file.</source>

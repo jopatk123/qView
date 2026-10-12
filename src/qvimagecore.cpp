@@ -14,6 +14,7 @@
 #include <QIcon>
 #include <QGuiApplication>
 #include <QScreen>
+#include "qvcompress.h"
 #include <QImageWriter>
 #include <QSaveFile>
 #include <QBuffer>
@@ -794,16 +795,15 @@ void QVImageCore::cropImage(const QRect &rect)
 
 QVImageCore::CompressionOutput QVImageCore::encodeCompressed(const QImage &source,
                                                               const QSize &targetSize,
-                                                              const QByteArray &format, int quality)
+                                                              const QByteArray &format, int quality,
+                                                              bool roundTrip)
 {
     CompressionOutput result;
     if (source.isNull() || targetSize.isEmpty() || format.isEmpty())
         return result;
 
     quality = qBound(1, quality, 100);
-    QImage image = source;
-    if (image.size() != targetSize)
-        image = image.scaled(targetSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    QImage image = QVCompress::resize(source, targetSize);
     if (image.isNull())
         return result;
 
@@ -811,16 +811,24 @@ QVImageCore::CompressionOutput QVImageCore::encodeCompressed(const QImage &sourc
         image = image.convertToFormat(QImage::Format_ARGB32);
 
     QByteArray encoded;
-    QBuffer buffer(&encoded);
-    buffer.open(QIODevice::WriteOnly);
-    QImageWriter writer(&buffer, format);
-    writer.setQuality(quality);
-    if (!writer.write(image))
+    const QByteArray formatName = format.toLower();
+    if (formatName == "jpeg" || formatName == "jpg")
+        encoded = QVCompress::encodeJpeg(image, quality);
+    if (encoded.isEmpty()) {
+        QBuffer buffer(&encoded);
+        buffer.open(QIODevice::WriteOnly);
+        QImageWriter writer(&buffer, format);
+        writer.setQuality(quality);
+        if (!writer.write(image))
+            return result;
+    }
+
+    result.encoded = encoded;
+    if (!roundTrip)
         return result;
 
-    QImage roundTrip = QImage::fromData(encoded, format);
-    result.image = roundTrip.isNull() ? image : roundTrip;
-    result.encoded = encoded;
+    const QImage decoded = QImage::fromData(encoded, format);
+    result.image = decoded.isNull() ? image : decoded;
     return result;
 }
 

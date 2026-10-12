@@ -32,6 +32,8 @@ struct QVBatchEncoded
     qint64 before = 0;
     QString error;
     QString fileName;
+    // File is already within the requested byte limit, so nothing is written.
+    bool unchanged = false;
 };
 
 struct QVBatchJobResult
@@ -39,6 +41,7 @@ struct QVBatchJobResult
     int succeeded = 0;
     int skipped = 0;
     int skippedAnimated = 0;
+    int skippedUnderLimit = 0;
     int failed = 0;
     int remaining = 0;
     bool cancelled = false;
@@ -96,6 +99,7 @@ private:
     QLabel *qualityValue = nullptr;
     QComboBox *sizeMode = nullptr;
     QSpinBox *sizeValue = nullptr;
+    QLabel *limitNote = nullptr;
     QComboBox *outputMode = nullptr;
     QLabel *outputNote = nullptr;
     QProgressBar *progressBar = nullptr;
