@@ -516,6 +516,64 @@ No write permission or file is read-only.</source>
         <source>Stop S&amp;lideshow</source>
         <translation>停止幻灯片放映(&amp;L)</translation>
     </message>
+    <message>
+        <source>Save</source>
+        <translation>保存</translation>
+    </message>
+    <message>
+        <source>Restore</source>
+        <translation>还原</translation>
+    </message>
+    <message>
+        <source>Crop</source>
+        <translation>裁剪</translation>
+    </message>
+    <message>
+        <source>Compress</source>
+        <translation>压缩</translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation>应用</translation>
+    </message>
+    <message>
+        <source>Quality</source>
+        <translation>质量</translation>
+    </message>
+    <message>
+        <source>Size</source>
+        <translation>尺寸</translation>
+    </message>
+    <message>
+        <source>Percent</source>
+        <translation>百分比</translation>
+    </message>
+    <message>
+        <source>Longest edge</source>
+        <translation>最长边</translation>
+    </message>
+    <message>
+        <source>Could not overwrite the original image.
+%1</source>
+        <translation>无法覆盖原图。
+%1</translation>
+    </message>
+    <message>
+        <source>The original file is overwritten only when you press Save.</source>
+        <translation>只有按下保存才会覆盖原文件。</translation>
+    </message>
+    <message>
+        <source>Drag to select the area to keep.</source>
+        <translation>拖拽选择要保留的区域。</translation>
+    </message>
+    <message>
+        <source>Could not compress this image.</source>
+        <translation>无法压缩这张图片。</translation>
+    </message>
+    <message>
+        <source>%1 x %2</source>
+        <translation>%1 x %2</translation>
+    </message>
 </context>
 <context>
     <name>OpenWith</name>
@@ -1751,6 +1809,17 @@ You can reenable them in the options dialog.</source>
         <location filename="../src/qvfileinfopanel.cpp" line="176"/>
         <source>%1 frames</source>
         <translation>%1 帧</translation>
+    </message>
+</context>
+<context>
+    <name>QVImageCore</name>
+    <message>
+        <source>There is nothing to save.</source>
+        <translation>没有需要保存的修改。</translation>
+    </message>
+    <message>
+        <source>Could not detect the image format.</source>
+        <translation>无法识别图片格式。</translation>
     </message>
 </context>
 </TS>

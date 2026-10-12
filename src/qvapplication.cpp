@@ -381,7 +381,8 @@ void QVApplication::ensureFontLoaded(const QString &path)
     loadedFontPaths.insert(path);
 }
 
-QIcon QVApplication::iconFromFont(const QString &fontFamily, const QChar &codePoint, const int pixelSize, const qreal pixelRatio)
+QIcon QVApplication::iconFromFont(const QString &fontFamily, const QChar &codePoint, const int pixelSize,
+                                 const qreal pixelRatio, const QColor &color)
 {
     const int scaledPixelSize = qRound(pixelSize * pixelRatio);
 
@@ -394,7 +395,7 @@ QIcon QVApplication::iconFromFont(const QString &fontFamily, const QChar &codePo
 
     QPainter painter(&pixmap);
     painter.setFont(font);
-    painter.setPen(QApplication::palette().color(QPalette::WindowText));
+    painter.setPen(color.isValid() ? color : QApplication::palette().color(QPalette::WindowText));
     painter.drawText(pixmap.rect(), codePoint);
 
     return QIcon(pixmap);

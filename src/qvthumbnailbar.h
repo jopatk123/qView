@@ -70,6 +70,9 @@ public:
     // Re-sync the thumbnail list with the image core's current file details
     void syncFromCore(const QVImageCore::FileDetails &details);
 
+    // Ask visible cells to reload. Used after the current file is overwritten.
+    void refreshThumbnails();
+
     // Re-read size and color settings
     void settingsUpdated();
 

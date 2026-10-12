@@ -14,6 +14,9 @@
 #include <QIcon>
 #include <QGuiApplication>
 #include <QScreen>
+#include <QImageWriter>
+#include <QSaveFile>
+#include <QBuffer>
 
 QCache<QString, QVImageCore::ReadData> QVImageCore::imageCache;
 
@@ -25,6 +28,8 @@ QVImageCore::QVImageCore(QObject *parent) : QObject(parent)
 #endif
 
     currentRotation = 0;
+    imageModified = false;
+    saveQuality = -1;
 
     connect(&loadedMovie, &QMovie::updated, this, &QVImageCore::animatedFrameChanged);
 
@@ -186,13 +191,17 @@ void QVImageCore::loadPixmap(const ReadData &readData)
 
     // Reset mechanism to avoid stalling while loading
     waitingOnLoad = false;
+    // Edits belong to the file being left. Rotation is not carried onto the next one.
+    resetEditState();
 
     if (currentFileDetails.errorData.hasError) {
         loadEmptyPixmap();
         return;
     }
 
-    loadedPixmap = QPixmap::fromImage(matchCurrentRotation(readData.image));
+    loadedPixmap = QPixmap::fromImage(readData.image);
+    loadedCacheKey = getPixmapCacheKey(readData.absoluteFilePath, readData.fileSize,
+                                       readData.targetColorSpace);
 
     // Set file details
     currentFileDetails.isPixmapLoaded = true;
@@ -237,7 +246,64 @@ void QVImageCore::loadPixmap(const ReadData &readData)
 void QVImageCore::closeImage()
 {
     currentFileDetails = getEmptyFileDetails();
+    resetEditState();
     loadEmptyPixmap();
+}
+
+void QVImageCore::resetEditState()
+{
+    currentRotation = 0;
+    imageModified = false;
+    saveQuality = -1;
+    loadedCacheKey.clear();
+    originalImage = QImage();
+    originalBaseSize = QSize();
+}
+
+void QVImageCore::keepOriginalBeforeEdit()
+{
+    if (imageModified || !canEditStill())
+        return;
+
+    originalImage = loadedPixmap.toImage();
+    originalBaseSize = currentFileDetails.baseImageSize;
+}
+
+bool QVImageCore::canEditStill() const
+{
+    return currentFileDetails.isPixmapLoaded && !currentFileDetails.isMovieLoaded
+            && !loadedPixmap.isNull();
+}
+
+QByteArray QVImageCore::originalFormat() const
+{
+    QImageReader reader(currentFileDetails.fileInfo.absoluteFilePath());
+    QByteArray format = reader.format();
+    if (format.isEmpty())
+        format = currentFileDetails.fileInfo.suffix().toLatin1().toLower();
+    return format;
+}
+
+void QVImageCore::markModified()
+{
+    if (!canEditStill())
+        return;
+
+    imageModified = true;
+}
+
+void QVImageCore::replacePixmap(const QImage &image)
+{
+    if (image.isNull() || !canEditStill())
+        return;
+
+    keepOriginalBeforeEdit();
+    loadedPixmap = QPixmap::fromImage(image);
+    currentFileDetails.loadedPixmapSize = loadedPixmap.size();
+    currentFileDetails.baseImageSize = loadedPixmap.size();
+    markModified();
+    emit updateLoadedPixmapItem();
+    emit imageStateChanged();
 }
 
 void QVImageCore::loadEmptyPixmap()
@@ -643,6 +709,9 @@ void QVImageCore::setSpeed(int desiredSpeed)
 
 void QVImageCore::rotateImage(int rotation)
 {
+    if (!currentFileDetails.isMovieLoaded)
+        keepOriginalBeforeEdit();
+
     currentRotation += rotation;
 
     // normalize between 360 and 0
@@ -661,7 +730,156 @@ void QVImageCore::rotateImage(int rotation)
     loadedPixmap.convertFromImage(transformedImage);
 
     currentFileDetails.loadedPixmapSize = QSize(loadedPixmap.width(), loadedPixmap.height());
+    if (!currentFileDetails.isMovieLoaded) {
+        currentFileDetails.baseImageSize = currentFileDetails.loadedPixmapSize;
+        markModified();
+    }
     emit updateLoadedPixmapItem();
+    emit imageStateChanged();
+}
+
+namespace {
+
+bool isLossyFormat(const QByteArray &format)
+{
+    const QByteArray name = format.toLower();
+    return name == "jpeg" || name == "jpg" || name == "webp" || name == "heic" || name == "heif"
+            || name == "avif" || name == "jxl";
+}
+
+} // namespace
+
+void QVImageCore::mirrorImage()
+{
+    if (!canEditStill())
+        return;
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+    replacePixmap(loadedPixmap.toImage().flipped(Qt::Horizontal));
+#else
+    replacePixmap(loadedPixmap.toImage().mirrored(true, false));
+#endif
+}
+
+void QVImageCore::flipImage()
+{
+    if (!canEditStill())
+        return;
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+    replacePixmap(loadedPixmap.toImage().flipped(Qt::Vertical));
+#else
+    replacePixmap(loadedPixmap.toImage().mirrored(false, true));
+#endif
+}
+
+void QVImageCore::cropImage(const QRect &rect)
+{
+    if (!canEditStill())
+        return;
+
+    const QRect bounded = rect.intersected(loadedPixmap.rect());
+    if (bounded.width() < 2 || bounded.height() < 2 || bounded.size() == loadedPixmap.size())
+        return;
+
+    replacePixmap(loadedPixmap.toImage().copy(bounded));
+}
+
+bool QVImageCore::compressImage(const QSize &targetSize, int quality)
+{
+    if (!canEditStill() || targetSize.isEmpty())
+        return false;
+
+    quality = qBound(1, quality, 100);
+    QImage image = loadedPixmap.toImage();
+    if (image.size() != targetSize) {
+        image = image.scaled(targetSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    }
+
+    if (image.isNull())
+        return false;
+
+    const QByteArray format = originalFormat();
+    if (isLossyFormat(format)) {
+        QByteArray encoded;
+        QBuffer buffer(&encoded);
+        buffer.open(QIODevice::WriteOnly);
+        QImageWriter writer(&buffer, format);
+        writer.setQuality(quality);
+        if (writer.write(image)) {
+            QImage roundTrip = QImage::fromData(encoded, format);
+            if (!roundTrip.isNull())
+                image = roundTrip;
+        }
+    }
+
+    saveQuality = quality;
+    replacePixmap(image);
+    return imageModified;
+}
+
+QString QVImageCore::saveOverOriginal()
+{
+    if (!imageModified || !canEditStill())
+        return tr("There is nothing to save.");
+
+    const QString path = currentFileDetails.fileInfo.absoluteFilePath();
+    QByteArray format = originalFormat();
+    if (format.isEmpty())
+        return tr("Could not detect the image format.");
+
+    QImage image = loadedPixmap.toImage();
+    if (image.format() == QImage::Format_ARGB32_Premultiplied)
+        image = image.convertToFormat(QImage::Format_ARGB32);
+
+    int quality = saveQuality;
+    if (quality < 0 && isLossyFormat(format))
+        quality = 95;
+
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly))
+        return file.errorString();
+
+    QImageWriter writer(&file, format);
+    if (quality >= 0)
+        writer.setQuality(quality);
+    if (!writer.write(image)) {
+        const QString error = writer.errorString();
+        file.cancelWriting();
+        return error;
+    }
+    if (!file.commit())
+        return file.errorString();
+
+    if (!loadedCacheKey.isEmpty())
+        imageCache.remove(loadedCacheKey);
+
+    currentFileDetails.fileInfo.refresh();
+    imageModified = false;
+    saveQuality = -1;
+    currentRotation = 0;
+    originalImage = QImage();
+    originalBaseSize = QSize();
+    emit imageStateChanged();
+    return {};
+}
+
+void QVImageCore::revertEdits()
+{
+    if (!imageModified || originalImage.isNull() || !canEditStill())
+        return;
+
+    loadedPixmap = QPixmap::fromImage(originalImage);
+    currentFileDetails.loadedPixmapSize = loadedPixmap.size();
+    currentFileDetails.baseImageSize =
+            originalBaseSize.isValid() ? originalBaseSize : loadedPixmap.size();
+    originalImage = QImage();
+    originalBaseSize = QSize();
+    imageModified = false;
+    saveQuality = -1;
+    currentRotation = 0;
+    emit updateLoadedPixmapItem();
+    emit imageStateChanged();
 }
 
 QImage QVImageCore::matchCurrentRotation(const QImage &imageToRotate)

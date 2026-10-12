@@ -107,6 +107,17 @@ public:
     void setSpeed(int desiredSpeed);
 
     void rotateImage(int rotation);
+    void mirrorImage();
+    void flipImage();
+    void cropImage(const QRect &rect);
+    // Resizes to targetSize and remembers quality for the later overwrite.
+    bool compressImage(const QSize &targetSize, int quality);
+    // Empty string on success. Overwrites the current file with no prompt.
+    QString saveOverOriginal();
+    void revertEdits();
+    bool isImageModified() const { return imageModified; }
+    bool canEditStill() const;
+    QByteArray originalFormat() const;
     QImage matchCurrentRotation(const QImage &imageToRotate);
     QPixmap matchCurrentRotation(const QPixmap &pixmapToRotate);
 
@@ -126,9 +137,15 @@ signals:
 
     void fileChanged();
 
+    void imageStateChanged();
+
 protected:
     void loadEmptyPixmap();
     FileDetails getEmptyFileDetails();
+    void resetEditState();
+    void replacePixmap(const QImage &image);
+    void markModified();
+    void keepOriginalBeforeEdit();
 
 private:
     QPixmap loadedPixmap;
@@ -136,6 +153,11 @@ private:
 
     FileDetails currentFileDetails;
     int currentRotation;
+    bool imageModified;
+    int saveQuality;
+    QString loadedCacheKey;
+    QImage originalImage;
+    QSize originalBaseSize;
 
     QFutureWatcher<ReadData> loadFutureWatcher;
 

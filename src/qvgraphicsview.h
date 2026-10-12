@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QTimer>
 #include <QFileInfo>
+#include <QRubberBand>
 
 class QVGraphicsView : public QGraphicsView
 {
@@ -49,6 +50,16 @@ public:
     void setPaused(const bool &desiredState);
     void setSpeed(const int &desiredSpeed);
     void rotateImage(int rotation);
+    void mirrorImage();
+    void flipImage();
+    bool beginCrop();
+    void cancelCrop();
+    bool isCropping() const { return cropMode; }
+    bool compressImage(const QSize &targetSize, int quality);
+    QString saveOverOriginal();
+    void revertEdits();
+    bool isImageModified() const { return imageCore.isImageModified(); }
+    bool canEditStill() const { return imageCore.canEditStill(); }
 
     const QVImageCore::FileDetails &getCurrentFileDetails() const
     {
@@ -63,6 +74,10 @@ signals:
     void fileChanged();
 
     void updatedLoadedPixmapItem();
+
+    void imageStateChanged();
+
+    void cropModeChanged(bool active);
 
 protected:
     void wheelEvent(QWheelEvent *event) override;
@@ -109,6 +124,7 @@ private slots:
 
 private:
     void updateFilteringMode();
+    QRect pixmapRectForViewportRect(const QRect &viewportRect) const;
 
     QGraphicsPixmapItem *loadedPixmapItem;
 
@@ -136,5 +152,10 @@ private:
     Qt::MouseButton mousePressButton;
     Qt::KeyboardModifiers mousePressModifiers;
     QPoint mousePressPosition;
+
+    bool cropMode = false;
+    bool cropDragging = false;
+    QPoint cropOrigin;
+    QRubberBand *cropRubberBand = nullptr;
 };
 #endif // QVGRAPHICSVIEW_H

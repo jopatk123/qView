@@ -252,6 +252,12 @@ void QVThumbnailBar::syncFromCore(const QVImageCore::FileDetails &details)
     requestVisibleThumbnails();
 }
 
+void QVThumbnailBar::refreshThumbnails()
+{
+    requestVisibleThumbnails();
+    listView->viewport()->update();
+}
+
 void QVThumbnailBar::settingsUpdated()
 {
     auto &settingsManager = qvApp->getSettingsManager();

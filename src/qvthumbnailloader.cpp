@@ -1,6 +1,7 @@
 #include "qvthumbnailloader.h"
 
 #include <QImageReader>
+#include <QFileInfo>
 #include <QFutureWatcher>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QThreadPool>
@@ -22,7 +23,9 @@ QThreadPool *thumbnailThreadPool()
 
 QString cacheKey(const QString &filePath, int pixelSize)
 {
-    return filePath + "\n" + QString::number(pixelSize);
+    const QFileInfo info(filePath);
+    return filePath + "\n" + QString::number(pixelSize) + "\n" + QString::number(info.size())
+            + "\n" + QString::number(info.lastModified().toMSecsSinceEpoch());
 }
 
 } // namespace

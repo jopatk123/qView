@@ -12,6 +12,7 @@
 #include <QtMath>
 #include <QGestureEvent>
 #include <QScrollBar>
+#include <QtMath>
 
 namespace {
 
@@ -75,6 +76,7 @@ QVGraphicsView::QVGraphicsView(QWidget *parent) : QGraphicsView(parent)
     connect(&imageCore, &QVImageCore::fileChanged, this, &QVGraphicsView::postLoad);
     connect(&imageCore, &QVImageCore::updateLoadedPixmapItem, this,
             &QVGraphicsView::updateLoadedPixmapItem);
+    connect(&imageCore, &QVImageCore::imageStateChanged, this, &QVGraphicsView::imageStateChanged);
 
     // Should replace the other timer eventually
     expensiveScaleTimerNew = new QTimer(this);
@@ -96,6 +98,11 @@ QVGraphicsView::QVGraphicsView(QWidget *parent) : QGraphicsView(parent)
 void QVGraphicsView::resizeEvent(QResizeEvent *event)
 {
     QGraphicsView::resizeEvent(event);
+    if (cropDragging) {
+        cropDragging = false;
+        if (cropRubberBand)
+            cropRubberBand->hide();
+    }
     if (!isOriginalSize)
         resetScale();
     else
@@ -135,11 +142,28 @@ void QVGraphicsView::enterEvent(QEnterEvent *event)
 #endif
 {
     QGraphicsView::enterEvent(event);
-    viewport()->setCursor(Qt::ArrowCursor);
+    viewport()->setCursor(cropMode ? Qt::CrossCursor : Qt::ArrowCursor);
 }
 
 void QVGraphicsView::mousePressEvent(QMouseEvent *event)
 {
+    if (cropMode && event->button() == Qt::RightButton) {
+        cancelCrop();
+        event->accept();
+        return;
+    }
+
+    if (cropMode && event->button() == Qt::LeftButton && canEditStill()) {
+        cropDragging = true;
+        cropOrigin = event->pos();
+        if (!cropRubberBand)
+            cropRubberBand = new QRubberBand(QRubberBand::Rectangle, viewport());
+        cropRubberBand->setGeometry(QRect(cropOrigin, QSize(1, 1)));
+        cropRubberBand->show();
+        event->accept();
+        return;
+    }
+
     const auto startWindowMove = [this, event]() {
 #ifdef COCOA_LOADED
         return QVCocoaFunctions::startSystemMove(window());
@@ -196,6 +220,16 @@ void QVGraphicsView::mousePressEvent(QMouseEvent *event)
 
 void QVGraphicsView::mouseMoveEvent(QMouseEvent *event)
 {
+    if (cropDragging && cropRubberBand) {
+        const QRect imageOnView =
+                mapFromScene(loadedPixmapItem->sceneBoundingRect()).boundingRect();
+        const QRect selection =
+                QRect(cropOrigin, event->pos()).normalized().intersected(imageOnView);
+        cropRubberBand->setGeometry(selection);
+        event->accept();
+        return;
+    }
+
     if (mousePressButton == Qt::LeftButton) {
         if (mousePressModifiers.testFlag(Qt::ControlModifier)
             && !event->modifiers().testFlag(Qt::ControlModifier)) {
@@ -215,6 +249,21 @@ void QVGraphicsView::mouseMoveEvent(QMouseEvent *event)
 
 void QVGraphicsView::mouseReleaseEvent(QMouseEvent *event)
 {
+    if (cropDragging && event->button() == Qt::LeftButton) {
+        cropDragging = false;
+        const QRect selection = cropRubberBand ? cropRubberBand->geometry() : QRect();
+        if (cropRubberBand)
+            cropRubberBand->hide();
+        const QRect pixels = pixmapRectForViewportRect(selection);
+        const QSize fullSize = getLoadedPixmap().size();
+        if (pixels.width() >= 2 && pixels.height() >= 2 && pixels.size() != fullSize)
+            imageCore.cropImage(pixels);
+        if (pixels.width() >= 2 && pixels.height() >= 2)
+            cancelCrop();
+        event->accept();
+        return;
+    }
+
     mousePressButton = Qt::NoButton;
     mousePressModifiers = Qt::NoModifier;
     QGraphicsView::mouseReleaseEvent(event);
@@ -375,6 +424,7 @@ void QVGraphicsView::reloadFile()
 
 void QVGraphicsView::postLoad()
 {
+    cancelCrop();
     updateLoadedPixmapItem();
     qvApp->getActionManager().addFileToRecentsList(getCurrentFileDetails().fileInfo);
 
@@ -814,5 +864,84 @@ void QVGraphicsView::setSpeed(const int &desiredSpeed)
 
 void QVGraphicsView::rotateImage(int rotation)
 {
+    cancelCrop();
     imageCore.rotateImage(rotation);
+}
+
+void QVGraphicsView::mirrorImage()
+{
+    cancelCrop();
+    imageCore.mirrorImage();
+}
+
+void QVGraphicsView::flipImage()
+{
+    cancelCrop();
+    imageCore.flipImage();
+}
+
+bool QVGraphicsView::beginCrop()
+{
+    if (!canEditStill())
+        return false;
+
+    cropMode = true;
+    cropDragging = false;
+    setDragMode(QGraphicsView::NoDrag);
+    viewport()->setCursor(Qt::CrossCursor);
+    setFocus(Qt::OtherFocusReason);
+    emit cropModeChanged(true);
+    return true;
+}
+
+void QVGraphicsView::cancelCrop()
+{
+    if (!cropMode && !cropDragging)
+        return;
+
+    cropMode = false;
+    cropDragging = false;
+    if (cropRubberBand)
+        cropRubberBand->hide();
+    setDragMode(QGraphicsView::ScrollHandDrag);
+    viewport()->setCursor(Qt::ArrowCursor);
+    emit cropModeChanged(false);
+}
+
+bool QVGraphicsView::compressImage(const QSize &targetSize, int quality)
+{
+    cancelCrop();
+    return imageCore.compressImage(targetSize, quality);
+}
+
+QString QVGraphicsView::saveOverOriginal()
+{
+    cancelCrop();
+    return imageCore.saveOverOriginal();
+}
+
+void QVGraphicsView::revertEdits()
+{
+    cancelCrop();
+    imageCore.revertEdits();
+}
+
+QRect QVGraphicsView::pixmapRectForViewportRect(const QRect &viewportRect) const
+{
+    const QRectF bounds = loadedPixmapItem->sceneBoundingRect();
+    const QSize pixmapSize = getLoadedPixmap().size();
+    if (bounds.isEmpty() || pixmapSize.isEmpty() || viewportRect.isEmpty())
+        return {};
+
+    const QRectF selected = mapToScene(viewportRect).boundingRect().intersected(bounds);
+    if (selected.isEmpty())
+        return {};
+
+    const int x = qFloor((selected.left() - bounds.left()) / bounds.width() * pixmapSize.width());
+    const int y = qFloor((selected.top() - bounds.top()) / bounds.height() * pixmapSize.height());
+    const int right = qCeil((selected.right() - bounds.left()) / bounds.width() * pixmapSize.width());
+    const int bottom =
+            qCeil((selected.bottom() - bounds.top()) / bounds.height() * pixmapSize.height());
+    return QRect(QPoint(x, y), QPoint(right, bottom))
+            .intersected(QRect(QPoint(0, 0), pixmapSize));
 }

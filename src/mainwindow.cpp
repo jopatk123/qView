@@ -35,6 +35,14 @@
 #include <QMenu>
 #include <QToolButton>
 #include <QWindow>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QSlider>
+#include <QSpinBox>
+#include <QLabel>
+#include <QComboBox>
+#include <QPushButton>
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QTemporaryFile>
@@ -112,6 +120,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     // Connect graphicsview signals
     connect(graphicsView, &QVGraphicsView::fileChanged, this, &MainWindow::fileChanged);
+    connect(graphicsView, &QVGraphicsView::imageStateChanged, this, [this]() {
+        updateImageToolbar();
+        updateWindowTitle();
+        refreshProperties();
+    });
+    connect(graphicsView, &QVGraphicsView::cropModeChanged, this, [this](bool) {
+        updateImageToolbar();
+    });
     connect(graphicsView, &QVGraphicsView::updatedLoadedPixmapItem, this,
             &MainWindow::setWindowSize);
     connect(graphicsView, &QVGraphicsView::cancelSlideshow, this, &MainWindow::cancelSlideshow);
@@ -119,6 +135,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     // Initialize escape shortcut
     escShortcut = new QShortcut(Qt::Key_Escape, this);
     connect(escShortcut, &QShortcut::activated, this, [this]() {
+        if (graphicsView->isCropping()) {
+            graphicsView->cancelCrop();
+            return;
+        }
         if (windowState().testFlag(Qt::WindowFullScreen))
             toggleFullScreen();
     });
@@ -1126,14 +1146,147 @@ void MainWindow::rotateLeft()
 
 void MainWindow::mirror()
 {
-    graphicsView->scale(-1, 1);
-    resetZoom();
+    if (getCurrentFileDetails().isMovieLoaded) {
+        graphicsView->scale(-1, 1);
+        resetZoom();
+        return;
+    }
+    graphicsView->mirrorImage();
 }
 
 void MainWindow::flip()
 {
-    graphicsView->scale(1, -1);
-    resetZoom();
+    if (getCurrentFileDetails().isMovieLoaded) {
+        graphicsView->scale(1, -1);
+        resetZoom();
+        return;
+    }
+    graphicsView->flipImage();
+}
+
+void MainWindow::saveImage()
+{
+    if (!graphicsView->isImageModified())
+        return;
+
+    const QString error = graphicsView->saveOverOriginal();
+    if (!error.isEmpty()) {
+        QMessageBox::warning(this, tr("Save"),
+                             tr("Could not overwrite the original image.\n%1").arg(error));
+        return;
+    }
+
+    updateImageToolbar();
+    updateWindowTitle();
+    refreshProperties();
+    thumbnailBar->refreshThumbnails();
+}
+
+void MainWindow::revertImage()
+{
+    if (!graphicsView->isImageModified())
+        return;
+
+    graphicsView->revertEdits();
+}
+
+void MainWindow::cropImage()
+{
+    if (graphicsView->isCropping())
+        graphicsView->cancelCrop();
+    else if (!graphicsView->beginCrop())
+        cropButton->setChecked(false);
+}
+
+void MainWindow::compressImage()
+{
+    if (!graphicsView->canEditStill())
+        return;
+
+    const QSize sourceSize = getCurrentFileDetails().loadedPixmapSize;
+    auto *dialog = new QDialog(this);
+    dialog->setWindowTitle(tr("Compress"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    auto *layout = new QVBoxLayout(dialog);
+    auto *form = new QFormLayout();
+
+    auto *qualitySlider = new QSlider(Qt::Horizontal, dialog);
+    qualitySlider->setRange(1, 100);
+    qualitySlider->setValue(85);
+    auto *qualityValue = new QLabel(QString::number(qualitySlider->value()), dialog);
+    auto *qualityRow = new QHBoxLayout();
+    qualityRow->addWidget(qualitySlider, 1);
+    qualityRow->addWidget(qualityValue);
+    form->addRow(tr("Quality"), qualityRow);
+    connect(qualitySlider, qOverload<int>(&QSlider::valueChanged), qualityValue,
+            [qualityValue](int value) { qualityValue->setNum(value); });
+
+    auto *sizeMode = new QComboBox(dialog);
+    sizeMode->addItem(tr("Percent"));
+    sizeMode->addItem(tr("Longest edge"));
+    form->addRow(tr("Size"), sizeMode);
+
+    auto *sizeValue = new QSpinBox(dialog);
+    const int longestEdge = qMax(sourceSize.width(), sourceSize.height());
+    sizeValue->setRange(1, 100);
+    sizeValue->setValue(100);
+    sizeValue->setSuffix(QStringLiteral("%"));
+    form->addRow(QString(), sizeValue);
+
+    auto *resultLabel = new QLabel(dialog);
+    form->addRow(resultLabel);
+    layout->addLayout(form);
+    layout->addWidget(new QLabel(
+            tr("The original file is overwritten only when you press Save."), dialog));
+
+    const auto updateResult = [=]() {
+        QSize target = sourceSize;
+        if (sizeMode->currentIndex() == 0) {
+            target.setWidth(qMax(1, qRound(sourceSize.width() * sizeValue->value() / 100.0)));
+            target.setHeight(qMax(1, qRound(sourceSize.height() * sizeValue->value() / 100.0)));
+        } else if (longestEdge > 0) {
+            target.scale(sizeValue->value(), sizeValue->value(), Qt::KeepAspectRatio);
+            target.setWidth(qMax(1, target.width()));
+            target.setHeight(qMax(1, target.height()));
+        }
+        resultLabel->setText(tr("%1 x %2").arg(target.width()).arg(target.height()));
+    };
+    connect(sizeMode, qOverload<int>(&QComboBox::currentIndexChanged), dialog, [=](int index) {
+        if (index == 0) {
+            sizeValue->setRange(1, 100);
+            sizeValue->setSuffix(QStringLiteral("%"));
+            sizeValue->setValue(100);
+        } else {
+            sizeValue->setRange(1, qMax(1, longestEdge));
+            sizeValue->setSuffix(QStringLiteral(" px"));
+            sizeValue->setValue(qMax(1, longestEdge));
+        }
+        updateResult();
+    });
+    connect(sizeValue, qOverload<int>(&QSpinBox::valueChanged), dialog, [=](int) { updateResult(); });
+    updateResult();
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+    if (QPushButton *ok = buttons->button(QDialogButtonBox::Ok))
+        ok->setText(tr("Apply"));
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(dialog, &QDialog::accepted, this, [=]() {
+        QSize target = sourceSize;
+        if (sizeMode->currentIndex() == 0) {
+            target.setWidth(qMax(1, qRound(sourceSize.width() * sizeValue->value() / 100.0)));
+            target.setHeight(qMax(1, qRound(sourceSize.height() * sizeValue->value() / 100.0)));
+        } else {
+            target.scale(sizeValue->value(), sizeValue->value(), Qt::KeepAspectRatio);
+            target.setWidth(qMax(1, target.width()));
+            target.setHeight(qMax(1, target.height()));
+        }
+        if (!graphicsView->compressImage(target, qualitySlider->value())) {
+            QMessageBox::warning(this, tr("Compress"), tr("Could not compress this image."));
+        }
+    });
+    dialog->open();
 }
 
 void MainWindow::firstFile()
@@ -1405,13 +1558,28 @@ void MainWindow::setupImageToolbar()
     };
 
     openButton = addButton(actionToolTip(QStringLiteral("open")), false);
+    restoreButton = addButton(tr("Restore"), false);
+    saveButton = addButton(tr("Save"), false);
+    cropButton = addButton(tr("Crop"), true);
+    compressButton = addButton(tr("Compress"), false);
     rotateRightButton = addButton(actionToolTip(QStringLiteral("rotateright")), false);
     thumbnailBarButton = addButton(actionToolTip(QStringLiteral("togglethumbnailbar")), true);
     fileInfoButton = addButton(actionToolTip(QStringLiteral("togglefileinfopanel")), true);
     trashButton = addButton(actionToolTip(QStringLiteral("delete")), false);
     toolbarLayout->addStretch(1);
 
+    restoreButton->setObjectName(QStringLiteral("restoreImageButton"));
+    restoreButton->setVisible(false);
+    saveButton->setObjectName(QStringLiteral("saveImageButton"));
+    saveButton->setVisible(false);
+    cropButton->setEnabled(false);
+    compressButton->setEnabled(false);
+
     connect(openButton, &QToolButton::clicked, this, [this]() { qvApp->pickFile(this); });
+    connect(restoreButton, &QToolButton::clicked, this, &MainWindow::revertImage);
+    connect(saveButton, &QToolButton::clicked, this, &MainWindow::saveImage);
+    connect(cropButton, &QToolButton::clicked, this, &MainWindow::cropImage);
+    connect(compressButton, &QToolButton::clicked, this, &MainWindow::compressImage);
     connect(rotateRightButton, &QToolButton::clicked, this, &MainWindow::rotateRight);
     connect(thumbnailBarButton, &QToolButton::clicked, this,
             &MainWindow::toggleThumbnailBarVisible);
@@ -1423,7 +1591,13 @@ void MainWindow::setupImageToolbar()
             "QToolButton:hover { background: rgba(128, 128, 128, 50); }"
             "QToolButton:pressed { background: rgba(128, 128, 128, 80); }"
             "QToolButton:checked { background: rgba(128, 128, 128, 90); }"
-            "QToolButton:checked:hover { background: rgba(128, 128, 128, 120); }"));
+            "QToolButton:checked:hover { background: rgba(128, 128, 128, 120); }"
+            "QToolButton#restoreImageButton { background: rgba(67, 160, 71, 70); }"
+            "QToolButton#restoreImageButton:hover { background: rgba(67, 160, 71, 120); }"
+            "QToolButton#restoreImageButton:pressed { background: rgba(67, 160, 71, 160); }"
+            "QToolButton#saveImageButton { background: rgba(229, 57, 53, 70); }"
+            "QToolButton#saveImageButton:hover { background: rgba(229, 57, 53, 120); }"
+            "QToolButton#saveImageButton:pressed { background: rgba(229, 57, 53, 160); }"));
 
     imageColumnLayout->addWidget(imageToolbar);
     imageColumnLayout->addWidget(graphicsView, 1);
@@ -1444,6 +1618,14 @@ void MainWindow::updateImageToolbar()
                                    kImageToolbarIconSize, ratio);
     };
     openButton->setIcon(icon(0xe2c8));
+    restoreButton->setIcon(qvApp->iconFromFont(QStringLiteral("Material Icons Outlined"),
+                                               QChar(0xe8b3), kImageToolbarIconSize, ratio,
+                                               QColor(0x43, 0xA0, 0x47)));
+    saveButton->setIcon(qvApp->iconFromFont(QStringLiteral("Material Icons Outlined"),
+                                            QChar(0xe161), kImageToolbarIconSize, ratio,
+                                            QColor(0xE5, 0x39, 0x35)));
+    cropButton->setIcon(icon(0xe3be));
+    compressButton->setIcon(icon(0xe94d));
     rotateRightButton->setIcon(icon(0xe41a));
     thumbnailBarButton->setIcon(icon(0xe413));
     fileInfoButton->setIcon(icon(0xe88e));
@@ -1453,8 +1635,17 @@ void MainWindow::updateImageToolbar()
     fileInfoButton->setChecked(qvGetSettingInt(FileInfoPanelPosition) != 0);
 
     const bool hasImage = getCurrentFileDetails().isPixmapLoaded;
+    const bool canEdit = graphicsView->canEditStill();
     rotateRightButton->setEnabled(hasImage);
     trashButton->setEnabled(hasImage);
+    cropButton->setEnabled(canEdit);
+    compressButton->setEnabled(canEdit);
+    cropButton->setChecked(graphicsView->isCropping());
+    cropButton->setToolTip(graphicsView->isCropping() ? tr("Drag to select the area to keep.")
+                                                      : tr("Crop"));
+    const bool modified = graphicsView->isImageModified();
+    restoreButton->setVisible(modified);
+    saveButton->setVisible(modified);
 
     const QColor background = customBackgroundColor.isValid()
             ? customBackgroundColor

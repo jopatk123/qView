@@ -99,6 +99,14 @@ public:
 
     void flip();
 
+    void saveImage();
+
+    void revertImage();
+
+    void cropImage();
+
+    void compressImage();
+
     void firstFile();
 
     void previousFile();
@@ -182,6 +190,10 @@ private:
     QVBoxLayout *imageColumnLayout = nullptr;
     QWidget *imageToolbar = nullptr;
     QToolButton *openButton = nullptr;
+    QToolButton *restoreButton = nullptr;
+    QToolButton *saveButton = nullptr;
+    QToolButton *cropButton = nullptr;
+    QToolButton *compressButton = nullptr;
     QToolButton *rotateRightButton = nullptr;
     QToolButton *thumbnailBarButton = nullptr;
     QToolButton *fileInfoButton = nullptr;
