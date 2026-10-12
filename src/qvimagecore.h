@@ -10,6 +10,7 @@
 #include <QTimer>
 #include <QCache>
 #include <QElapsedTimer>
+#include <QByteArray>
 
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
 #  include <QColorSpace>
@@ -110,8 +111,23 @@ public:
     void mirrorImage();
     void flipImage();
     void cropImage(const QRect &rect);
-    // Resizes to targetSize and remembers quality for the later overwrite.
+    struct CompressionOutput
+    {
+        QImage image;
+        QByteArray encoded;
+    };
+    // Scales and encodes without touching the image on screen.
+    static CompressionOutput encodeCompressed(const QImage &source, const QSize &targetSize,
+                                              const QByteArray &format, int quality);
+    // Resizes to targetSize and remembers the encoded bytes for the later overwrite.
     bool compressImage(const QSize &targetSize, int quality);
+    // Applies an encode result already produced for the preview.
+    bool applyCompression(const CompressionOutput &output, int quality);
+    // -1 until a compression result is waiting to be saved.
+    qint64 pendingEncodedBytes() const
+    {
+        return pendingEncoded.isEmpty() ? -1 : pendingEncoded.size();
+    }
     // Empty string on success. Overwrites the current file with no prompt.
     QString saveOverOriginal();
     void revertEdits();
@@ -155,6 +171,7 @@ private:
     int currentRotation;
     bool imageModified;
     int saveQuality;
+    QByteArray pendingEncoded;
     QString loadedCacheKey;
     QImage originalImage;
     QSize originalBaseSize;

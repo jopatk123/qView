@@ -42,6 +42,9 @@
 #include <QSpinBox>
 #include <QLabel>
 #include <QComboBox>
+#include <QTimer>
+#include <QLocale>
+#include <memory>
 #include <QPushButton>
 #include <QNetworkRequest>
 #include <QNetworkReply>
@@ -51,6 +54,32 @@ namespace {
 
 const int kImageToolbarHeight = 34;
 const int kImageToolbarIconSize = 18;
+
+QString formatByteCount(qint64 bytes)
+{
+    return QLocale().formattedDataSize(qMax<qint64>(0, bytes));
+}
+
+QString compressionSummary(qint64 before, qint64 after)
+{
+    const QString afterText = formatByteCount(after);
+    if (before <= 0)
+        return MainWindow::tr("Compressed size: %1").arg(afterText);
+
+    const qint64 delta = before - after;
+    if (delta == 0)
+        return MainWindow::tr("%1 → %2, same size").arg(formatByteCount(before), afterText);
+
+    const int percent = int((qAbs(delta) * 100 + before / 2) / before);
+    const QString deltaText = formatByteCount(qAbs(delta));
+    const QString beforeText = formatByteCount(before);
+    if (delta > 0) {
+        return MainWindow::tr("%1 → %2, reduced %3 (%4%%)")
+                .arg(beforeText, afterText, deltaText, QString::number(percent));
+    }
+    return MainWindow::tr("%1 → %2, increased %3 (%4%%)")
+            .arg(beforeText, afterText, deltaText, QString::number(percent));
+}
 
 // Icons sit in the strip under the macOS titlebar. Empty space there still drags the window.
 class ImageToolbar : public QWidget
@@ -1203,13 +1232,31 @@ void MainWindow::compressImage()
     if (!graphicsView->canEditStill())
         return;
 
-    const QSize sourceSize = getCurrentFileDetails().loadedPixmapSize;
+    const QImage sourceImage = graphicsView->getLoadedPixmap().toImage();
+    const QSize sourceSize = sourceImage.size();
+    const qint64 originalBytes = getCurrentFileDetails().fileInfo.size();
+    const QByteArray format = graphicsView->originalFormat();
+    const int longestEdge = qMax(sourceSize.width(), sourceSize.height());
+
     auto *dialog = new QDialog(this);
     dialog->setWindowTitle(tr("Compress"));
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     auto *layout = new QVBoxLayout(dialog);
-    auto *form = new QFormLayout();
 
+    layout->addWidget(new QLabel(tr("Compressed preview"), dialog));
+    auto *preview = new QLabel(tr("Calculating…"), dialog);
+    preview->setAlignment(Qt::AlignCenter);
+    preview->setFixedSize(560, 320);
+    preview->setStyleSheet(QStringLiteral(
+            "QLabel { background: rgba(127, 127, 127, 40); border-radius: 6px; }"));
+    layout->addWidget(preview, 0, Qt::AlignHCenter);
+
+    auto *summaryLabel = new QLabel(tr("Calculating…"), dialog);
+    summaryLabel->setAlignment(Qt::AlignCenter);
+    summaryLabel->setWordWrap(true);
+    layout->addWidget(summaryLabel);
+
+    auto *form = new QFormLayout();
     auto *qualitySlider = new QSlider(Qt::Horizontal, dialog);
     qualitySlider->setRange(1, 100);
     qualitySlider->setValue(85);
@@ -1227,19 +1274,25 @@ void MainWindow::compressImage()
     form->addRow(tr("Size"), sizeMode);
 
     auto *sizeValue = new QSpinBox(dialog);
-    const int longestEdge = qMax(sourceSize.width(), sourceSize.height());
     sizeValue->setRange(1, 100);
     sizeValue->setValue(100);
     sizeValue->setSuffix(QStringLiteral("%"));
     form->addRow(QString(), sizeValue);
-
-    auto *resultLabel = new QLabel(dialog);
-    form->addRow(resultLabel);
     layout->addLayout(form);
-    layout->addWidget(new QLabel(
-            tr("The original file is overwritten only when you press Save."), dialog));
 
-    const auto updateResult = [=]() {
+    auto *note = new QLabel(tr("The original file is overwritten only when you press Save."), dialog);
+    note->setWordWrap(true);
+    layout->addWidget(note);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+    auto *applyButton = buttons->button(QDialogButtonBox::Ok);
+    if (applyButton) {
+        applyButton->setText(tr("Apply"));
+        applyButton->setEnabled(false);
+    }
+    layout->addWidget(buttons);
+
+    const auto targetSize = [=]() {
         QSize target = sourceSize;
         if (sizeMode->currentIndex() == 0) {
             target.setWidth(qMax(1, qRound(sourceSize.width() * sizeValue->value() / 100.0)));
@@ -1249,8 +1302,82 @@ void MainWindow::compressImage()
             target.setWidth(qMax(1, target.width()));
             target.setHeight(qMax(1, target.height()));
         }
-        resultLabel->setText(tr("%1 x %2").arg(target.width()).arg(target.height()));
+        return target;
     };
+
+    auto *debounce = new QTimer(dialog);
+    debounce->setSingleShot(true);
+    debounce->setInterval(300);
+    auto *watcher = new QFutureWatcher<QVImageCore::CompressionOutput>(dialog);
+    auto busy = std::make_shared<bool>(false);
+    auto dirty = std::make_shared<bool>(false);
+    auto latest = std::make_shared<QVImageCore::CompressionOutput>();
+    auto latestTarget = std::make_shared<QSize>();
+    auto latestQuality = std::make_shared<int>(-1);
+
+    const auto launch = [=]() {
+        if (*busy) {
+            *dirty = true;
+            return;
+        }
+        *busy = true;
+        *dirty = false;
+        if (applyButton)
+            applyButton->setEnabled(false);
+        summaryLabel->setText(tr("Calculating…"));
+        const QSize target = targetSize();
+        const int quality = qualitySlider->value();
+        watcher->setFuture(QtConcurrent::run([sourceImage, target, format, quality]() {
+            return QVImageCore::encodeCompressed(sourceImage, target, format, quality);
+        }));
+    };
+
+    connect(watcher, &QFutureWatcher<QVImageCore::CompressionOutput>::finished, dialog, [=]() {
+        *busy = false;
+        if (debounce->isActive() || *dirty) {
+            if (!debounce->isActive())
+                QTimer::singleShot(0, dialog, launch);
+            return;
+        }
+
+        const QVImageCore::CompressionOutput output = watcher->result();
+        if (output.encoded.isEmpty() || output.image.isNull()) {
+            preview->setPixmap(QPixmap());
+            preview->setText(tr("Could not compress this image."));
+            summaryLabel->clear();
+            if (applyButton)
+                applyButton->setEnabled(false);
+            return;
+        }
+
+        const qreal dpr = preview->devicePixelRatioF();
+        QPixmap pix = QPixmap::fromImage(output.image);
+        const QSize maxPx(qRound(preview->width() * dpr), qRound(preview->height() * dpr));
+        if (pix.width() > maxPx.width() || pix.height() > maxPx.height())
+            pix = pix.scaled(maxPx, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        pix.setDevicePixelRatio(dpr);
+        preview->setText(QString());
+        preview->setPixmap(pix);
+        *latest = output;
+        *latestTarget = targetSize();
+        *latestQuality = qualitySlider->value();
+        summaryLabel->setText(tr("%1 x %2\n%3")
+                                      .arg(output.image.width())
+                                      .arg(output.image.height())
+                                      .arg(compressionSummary(originalBytes, output.encoded.size())));
+        if (applyButton)
+            applyButton->setEnabled(true);
+    });
+    connect(debounce, &QTimer::timeout, dialog, launch);
+
+    const auto schedule = [=]() {
+        *dirty = true;
+        if (applyButton)
+            applyButton->setEnabled(false);
+        debounce->start();
+    };
+    connect(qualitySlider, qOverload<int>(&QSlider::valueChanged), dialog, [=](int) { schedule(); });
+    connect(sizeValue, qOverload<int>(&QSpinBox::valueChanged), dialog, [=](int) { schedule(); });
     connect(sizeMode, qOverload<int>(&QComboBox::currentIndexChanged), dialog, [=](int index) {
         if (index == 0) {
             sizeValue->setRange(1, 100);
@@ -1261,31 +1388,23 @@ void MainWindow::compressImage()
             sizeValue->setSuffix(QStringLiteral(" px"));
             sizeValue->setValue(qMax(1, longestEdge));
         }
-        updateResult();
+        schedule();
     });
-    connect(sizeValue, qOverload<int>(&QSpinBox::valueChanged), dialog, [=](int) { updateResult(); });
-    updateResult();
 
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
-    if (QPushButton *ok = buttons->button(QDialogButtonBox::Ok))
-        ok->setText(tr("Apply"));
-    layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
     connect(dialog, &QDialog::accepted, this, [=]() {
-        QSize target = sourceSize;
-        if (sizeMode->currentIndex() == 0) {
-            target.setWidth(qMax(1, qRound(sourceSize.width() * sizeValue->value() / 100.0)));
-            target.setHeight(qMax(1, qRound(sourceSize.height() * sizeValue->value() / 100.0)));
-        } else {
-            target.scale(sizeValue->value(), sizeValue->value(), Qt::KeepAspectRatio);
-            target.setWidth(qMax(1, target.width()));
-            target.setHeight(qMax(1, target.height()));
-        }
-        if (!graphicsView->compressImage(target, qualitySlider->value())) {
+        const QSize target = targetSize();
+        const int quality = qualitySlider->value();
+        const bool reuse = !latest->encoded.isEmpty() && *latestTarget == target
+                && *latestQuality == quality;
+        const bool applied = reuse ? graphicsView->applyCompression(*latest, quality)
+                                   : graphicsView->compressImage(target, quality);
+        if (!applied)
             QMessageBox::warning(this, tr("Compress"), tr("Could not compress this image."));
-        }
     });
+
+    schedule();
     dialog->open();
 }
 
@@ -1560,6 +1679,10 @@ void MainWindow::setupImageToolbar()
     openButton = addButton(actionToolTip(QStringLiteral("open")), false);
     restoreButton = addButton(tr("Restore"), false);
     saveButton = addButton(tr("Save"), false);
+    compressResultLabel = new QLabel(imageToolbar);
+    compressResultLabel->setVisible(false);
+    compressResultLabel->setAlignment(Qt::AlignVCenter);
+    toolbarLayout->addWidget(compressResultLabel);
     cropButton = addButton(tr("Crop"), true);
     compressButton = addButton(tr("Compress"), false);
     rotateRightButton = addButton(actionToolTip(QStringLiteral("rotateright")), false);
@@ -1646,6 +1769,15 @@ void MainWindow::updateImageToolbar()
     const bool modified = graphicsView->isImageModified();
     restoreButton->setVisible(modified);
     saveButton->setVisible(modified);
+    const qint64 encodedBytes = graphicsView->pendingEncodedBytes();
+    const bool showCompression = modified && encodedBytes >= 0;
+    compressResultLabel->setVisible(showCompression);
+    if (showCompression) {
+        const QString summary =
+                compressionSummary(getCurrentFileDetails().fileInfo.size(), encodedBytes);
+        compressResultLabel->setText(summary);
+        compressResultLabel->setToolTip(summary);
+    }
 
     const QColor background = customBackgroundColor.isValid()
             ? customBackgroundColor

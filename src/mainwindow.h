@@ -16,6 +16,7 @@ class MainWindow;
 }
 
 class QHBoxLayout;
+class QLabel;
 class QToolButton;
 class QVBoxLayout;
 class QVFileInfoPanel;
@@ -192,6 +193,7 @@ private:
     QToolButton *openButton = nullptr;
     QToolButton *restoreButton = nullptr;
     QToolButton *saveButton = nullptr;
+    QLabel *compressResultLabel = nullptr;
     QToolButton *cropButton = nullptr;
     QToolButton *compressButton = nullptr;
     QToolButton *rotateRightButton = nullptr;

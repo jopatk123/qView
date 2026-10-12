@@ -574,6 +574,36 @@ No write permission or file is read-only.</source>
         <source>%1 x %2</source>
         <translation>%1 x %2</translation>
     </message>
+    <message>
+        <source>Compressed preview</source>
+        <translation>压缩后预览</translation>
+    </message>
+    <message>
+        <source>Calculating…</source>
+        <translation>正在计算…</translation>
+    </message>
+    <message>
+        <source>%1 x %2
+%3</source>
+        <translation>%1 x %2
+%3</translation>
+    </message>
+    <message>
+        <source>Compressed size: %1</source>
+        <translation>压缩后大小：%1</translation>
+    </message>
+    <message>
+        <source>%1 → %2, same size</source>
+        <translation>%1 → %2，大小不变</translation>
+    </message>
+    <message>
+        <source>%1 → %2, reduced %3 (%4%%)</source>
+        <translation>%1 → %2，减少 %3（%4%%）</translation>
+    </message>
+    <message>
+        <source>%1 → %2, increased %3 (%4%%)</source>
+        <translation>%1 → %2，增加 %3（%4%%）</translation>
+    </message>
 </context>
 <context>
     <name>OpenWith</name>
@@ -1820,6 +1850,10 @@ You can reenable them in the options dialog.</source>
     <message>
         <source>Could not detect the image format.</source>
         <translation>无法识别图片格式。</translation>
+    </message>
+    <message>
+        <source>Could not write the image.</source>
+        <translation>无法写入图片。</translation>
     </message>
 </context>
 </TS>

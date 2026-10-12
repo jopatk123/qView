@@ -56,6 +56,9 @@ public:
     void cancelCrop();
     bool isCropping() const { return cropMode; }
     bool compressImage(const QSize &targetSize, int quality);
+    bool applyCompression(const QVImageCore::CompressionOutput &output, int quality);
+    QByteArray originalFormat() const { return imageCore.originalFormat(); }
+    qint64 pendingEncodedBytes() const { return imageCore.pendingEncodedBytes(); }
     QString saveOverOriginal();
     void revertEdits();
     bool isImageModified() const { return imageCore.isImageModified(); }

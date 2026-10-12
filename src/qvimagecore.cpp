@@ -255,6 +255,7 @@ void QVImageCore::resetEditState()
     currentRotation = 0;
     imageModified = false;
     saveQuality = -1;
+    pendingEncoded.clear();
     loadedCacheKey.clear();
     originalImage = QImage();
     originalBaseSize = QSize();
@@ -709,6 +710,7 @@ void QVImageCore::setSpeed(int desiredSpeed)
 
 void QVImageCore::rotateImage(int rotation)
 {
+    pendingEncoded.clear();
     if (!currentFileDetails.isMovieLoaded)
         keepOriginalBeforeEdit();
 
@@ -754,6 +756,8 @@ void QVImageCore::mirrorImage()
     if (!canEditStill())
         return;
 
+    pendingEncoded.clear();
+
 #if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
     replacePixmap(loadedPixmap.toImage().flipped(Qt::Horizontal));
 #else
@@ -765,6 +769,8 @@ void QVImageCore::flipImage()
 {
     if (!canEditStill())
         return;
+
+    pendingEncoded.clear();
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
     replacePixmap(loadedPixmap.toImage().flipped(Qt::Vertical));
@@ -782,7 +788,40 @@ void QVImageCore::cropImage(const QRect &rect)
     if (bounded.width() < 2 || bounded.height() < 2 || bounded.size() == loadedPixmap.size())
         return;
 
+    pendingEncoded.clear();
     replacePixmap(loadedPixmap.toImage().copy(bounded));
+}
+
+QVImageCore::CompressionOutput QVImageCore::encodeCompressed(const QImage &source,
+                                                              const QSize &targetSize,
+                                                              const QByteArray &format, int quality)
+{
+    CompressionOutput result;
+    if (source.isNull() || targetSize.isEmpty() || format.isEmpty())
+        return result;
+
+    quality = qBound(1, quality, 100);
+    QImage image = source;
+    if (image.size() != targetSize)
+        image = image.scaled(targetSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    if (image.isNull())
+        return result;
+
+    if (image.format() == QImage::Format_ARGB32_Premultiplied)
+        image = image.convertToFormat(QImage::Format_ARGB32);
+
+    QByteArray encoded;
+    QBuffer buffer(&encoded);
+    buffer.open(QIODevice::WriteOnly);
+    QImageWriter writer(&buffer, format);
+    writer.setQuality(quality);
+    if (!writer.write(image))
+        return result;
+
+    QImage roundTrip = QImage::fromData(encoded, format);
+    result.image = roundTrip.isNull() ? image : roundTrip;
+    result.encoded = encoded;
+    return result;
 }
 
 bool QVImageCore::compressImage(const QSize &targetSize, int quality)
@@ -790,31 +829,19 @@ bool QVImageCore::compressImage(const QSize &targetSize, int quality)
     if (!canEditStill() || targetSize.isEmpty())
         return false;
 
-    quality = qBound(1, quality, 100);
-    QImage image = loadedPixmap.toImage();
-    if (image.size() != targetSize) {
-        image = image.scaled(targetSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-    }
+    return applyCompression(
+            encodeCompressed(loadedPixmap.toImage(), targetSize, originalFormat(), quality),
+            quality);
+}
 
-    if (image.isNull())
+bool QVImageCore::applyCompression(const CompressionOutput &output, int quality)
+{
+    if (!canEditStill() || output.encoded.isEmpty() || output.image.isNull())
         return false;
 
-    const QByteArray format = originalFormat();
-    if (isLossyFormat(format)) {
-        QByteArray encoded;
-        QBuffer buffer(&encoded);
-        buffer.open(QIODevice::WriteOnly);
-        QImageWriter writer(&buffer, format);
-        writer.setQuality(quality);
-        if (writer.write(image)) {
-            QImage roundTrip = QImage::fromData(encoded, format);
-            if (!roundTrip.isNull())
-                image = roundTrip;
-        }
-    }
-
-    saveQuality = quality;
-    replacePixmap(image);
+    saveQuality = qBound(1, quality, 100);
+    pendingEncoded = output.encoded;
+    replacePixmap(output.image);
     return imageModified;
 }
 
@@ -828,25 +855,33 @@ QString QVImageCore::saveOverOriginal()
     if (format.isEmpty())
         return tr("Could not detect the image format.");
 
-    QImage image = loadedPixmap.toImage();
-    if (image.format() == QImage::Format_ARGB32_Premultiplied)
-        image = image.convertToFormat(QImage::Format_ARGB32);
-
-    int quality = saveQuality;
-    if (quality < 0 && isLossyFormat(format))
-        quality = 95;
-
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly))
         return file.errorString();
 
-    QImageWriter writer(&file, format);
-    if (quality >= 0)
-        writer.setQuality(quality);
-    if (!writer.write(image)) {
-        const QString error = writer.errorString();
-        file.cancelWriting();
-        return error;
+    if (!pendingEncoded.isEmpty()) {
+        if (file.write(pendingEncoded) != pendingEncoded.size()) {
+            const QString error = file.errorString();
+            file.cancelWriting();
+            return error.isEmpty() ? tr("Could not write the image.") : error;
+        }
+    } else {
+        QImage image = loadedPixmap.toImage();
+        if (image.format() == QImage::Format_ARGB32_Premultiplied)
+            image = image.convertToFormat(QImage::Format_ARGB32);
+
+        int quality = saveQuality;
+        if (quality < 0 && isLossyFormat(format))
+            quality = 95;
+
+        QImageWriter writer(&file, format);
+        if (quality >= 0)
+            writer.setQuality(quality);
+        if (!writer.write(image)) {
+            const QString error = writer.errorString();
+            file.cancelWriting();
+            return error;
+        }
     }
     if (!file.commit())
         return file.errorString();
@@ -857,6 +892,7 @@ QString QVImageCore::saveOverOriginal()
     currentFileDetails.fileInfo.refresh();
     imageModified = false;
     saveQuality = -1;
+    pendingEncoded.clear();
     currentRotation = 0;
     originalImage = QImage();
     originalBaseSize = QSize();
@@ -877,6 +913,7 @@ void QVImageCore::revertEdits()
     originalBaseSize = QSize();
     imageModified = false;
     saveQuality = -1;
+    pendingEncoded.clear();
     currentRotation = 0;
     emit updateLoadedPixmapItem();
     emit imageStateChanged();

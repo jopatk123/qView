@@ -914,6 +914,12 @@ bool QVGraphicsView::compressImage(const QSize &targetSize, int quality)
     return imageCore.compressImage(targetSize, quality);
 }
 
+bool QVGraphicsView::applyCompression(const QVImageCore::CompressionOutput &output, int quality)
+{
+    cancelCrop();
+    return imageCore.applyCompression(output, quality);
+}
+
 QString QVGraphicsView::saveOverOriginal()
 {
     cancelCrop();
