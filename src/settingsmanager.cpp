@@ -78,7 +78,6 @@ SettingsManager::SettingsManager(QObject *parent) : QObject(parent)
 QString SettingsManager::getSystemLanguage() const
 {
     QStringList available;
-    available.append(QStringLiteral("en"));
     const auto entries = QDir(":/i18n/").entryList();
     for (auto entry : entries) {
         if (!entry.startsWith(QLatin1String("qview_")) || !entry.endsWith(QLatin1String(".qm")))
@@ -88,6 +87,10 @@ QString SettingsManager::getSystemLanguage() const
         available.append(entry);
     }
 
+    // English is intentionally left out of "available": Windows reports its own English variants
+    // ahead of the user's actual UI language (e.g. "en-Latn-US | en | zh-Hans-CN"), so treating
+    // the bare "en" entry as a match would shadow Chinese, or any other language, further down
+    // the list. English stays the fallback at the end of this function instead.
     const auto languages = QLocale::system().uiLanguages();
     for (auto language : languages) {
         language.replace('-', '_');
