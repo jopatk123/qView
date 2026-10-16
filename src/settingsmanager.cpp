@@ -22,7 +22,7 @@ struct SettingDefinition
 static const SettingDefinition settingDefinitions[] = {
     // Window settings
     { SettingsManager::Setting::BgColorEnabled, true, "bgcolorenabled" },
-    { SettingsManager::Setting::BgColor, "#212121", "bgcolor" },
+    { SettingsManager::Setting::BgColor, "#FFFFFF", "bgcolor" },
     { SettingsManager::Setting::TitleBarMode, 1, "titlebarmode" },
     { SettingsManager::Setting::WindowResizeMode, 1, "windowresizemode" },
     { SettingsManager::Setting::MinWindowResizedPercentage, 20, "minwindowresizedpercentage" },
@@ -59,7 +59,7 @@ static const SettingDefinition settingDefinitions[] = {
     { SettingsManager::Setting::UpdateNotifications, false, "updatenotifications" },
     { SettingsManager::Setting::SkipHidden, true, "skiphidden" },
     // Thumbnail bar settings
-    { SettingsManager::Setting::ThumbnailBarPosition, 1, "thumbnailbarposition" },
+    { SettingsManager::Setting::ThumbnailBarPosition, 2, "thumbnailbarposition" },
     { SettingsManager::Setting::ThumbnailBarSize, 1, "thumbnailbarsize" },
     // File info panel: 0 hidden, 1 right, 2 bottom
     { SettingsManager::Setting::FileInfoPanelPosition, 0, "fileinfopanelposition" }
