@@ -103,6 +103,10 @@ public:
 
     void saveImage();
 
+    void printImage();
+
+    void exportPdf();
+
     void revertImage();
 
     void cropImage();
@@ -204,6 +208,8 @@ private:
     QToolButton *thumbnailBarButton = nullptr;
     QToolButton *fileInfoButton = nullptr;
     QToolButton *trashButton = nullptr;
+    QToolButton *printButton = nullptr;
+    QToolButton *pdfButton = nullptr;
     QHBoxLayout *imageRowLayout = nullptr;
     int appliedThumbnailPosition = 0;
     int appliedInfoPosition = 0;

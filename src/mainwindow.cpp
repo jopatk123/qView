@@ -23,7 +23,16 @@
 #include <QContextMenuEvent>
 #include <QMovie>
 #include <QImageWriter>
+#include <QPrintDialog>
+#include <QPrinter>
+#include <QPdfWriter>
+#include <QPainter>
+#include <QPageLayout>
+#include <QPageSize>
 #include <QSettings>
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+#include <QColorSpace>
+#endif
 #include <QStyle>
 #include <QIcon>
 #include <QMimeDatabase>
@@ -80,6 +89,34 @@ QString compressionSummary(qint64 before, qint64 after)
     }
     return MainWindow::tr("%1 → %2, increased %3 (%4%%)")
             .arg(beforeText, afterText, deltaText, QString::number(percent));
+}
+
+QImage outputImageFrom(const QVGraphicsView *view)
+{
+    const QVImageCore::FileDetails &details = view->getCurrentFileDetails();
+    QImage image = details.isMovieLoaded ? view->getLoadedMovie().currentPixmap().toImage()
+                                         : view->getLoadedPixmap().toImage();
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+    if (image.colorSpace().isValid() && image.colorSpace() != QColorSpace(QColorSpace::SRgb))
+        image = image.convertedToColorSpace(QColorSpace(QColorSpace::SRgb));
+#endif
+    return image;
+}
+
+void drawImageOnPage(QPainter &painter, const QRectF &pageRect, const QImage &image)
+{
+    painter.fillRect(pageRect, Qt::white);
+    if (image.isNull() || pageRect.isEmpty())
+        return;
+
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    QSizeF targetSize(image.size());
+    targetSize.scale(pageRect.size(), Qt::KeepAspectRatio);
+
+    const QRectF targetRect(pageRect.x() + (pageRect.width() - targetSize.width()) / 2.0,
+                            pageRect.y() + (pageRect.height() - targetSize.height()) / 2.0,
+                            targetSize.width(), targetSize.height());
+    painter.drawImage(targetRect, image);
 }
 
 // Icons sit in the strip under the macOS titlebar. Empty space there still drags the window.
@@ -1212,6 +1249,84 @@ void MainWindow::saveImage()
     thumbnailBar->refreshThumbnails();
 }
 
+void MainWindow::printImage()
+{
+    const QImage image = outputImageFrom(graphicsView);
+    if (image.isNull())
+        return;
+
+    QPrinter printer(QPrinter::HighResolution);
+    printer.setPageOrientation(image.width() > image.height() ? QPageLayout::Landscape
+                                                              : QPageLayout::Portrait);
+
+    QPrintDialog dialog(&printer, this);
+    dialog.setWindowTitle(tr("Print Image"));
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    QPainter painter;
+    if (!painter.begin(&printer)) {
+        QMessageBox::warning(this, tr("Print"), tr("Could not start printing."));
+        return;
+    }
+
+    drawImageOnPage(painter, printer.pageLayout().paintRectPixels(printer.resolution()), image);
+    painter.end();
+}
+
+void MainWindow::exportPdf()
+{
+    const QImage image = outputImageFrom(graphicsView);
+    if (image.isNull())
+        return;
+
+    const QFileInfo fileInfo = getCurrentFileDetails().fileInfo;
+    const QString defaultPath = fileInfo.absolutePath() + QLatin1Char('/')
+            + fileInfo.completeBaseName() + QStringLiteral(".pdf");
+
+    QString filePath = QFileDialog::getSaveFileName(this, tr("Save as PDF"), defaultPath,
+                                                    tr("PDF Files (*.pdf)"));
+    if (filePath.isEmpty())
+        return;
+
+    bool appendedSuffix = false;
+    if (!filePath.endsWith(QStringLiteral(".pdf"), Qt::CaseInsensitive)) {
+        filePath += QStringLiteral(".pdf");
+        appendedSuffix = true;
+    }
+
+    if (appendedSuffix && QFileInfo::exists(filePath)) {
+        const auto answer =
+                QMessageBox::question(this, tr("Save as PDF"),
+                                      tr("%1 already exists. Do you want to replace it?")
+                                              .arg(QFileInfo(filePath).fileName()),
+                                      QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes)
+            return;
+    }
+
+    QPdfWriter writer(filePath);
+    writer.setPageSize(QPageSize(QPageSize::A4));
+    writer.setPageOrientation(image.width() > image.height() ? QPageLayout::Landscape
+                                                             : QPageLayout::Portrait);
+    writer.setResolution(300);
+    writer.setTitle(fileInfo.completeBaseName());
+    writer.setCreator(QStringLiteral("qView"));
+
+    QPainter painter;
+    if (!painter.begin(&writer)) {
+        QMessageBox::warning(this, tr("Save as PDF"), tr("Could not create the PDF file."));
+        return;
+    }
+
+    drawImageOnPage(painter, writer.pageLayout().paintRectPixels(writer.resolution()), image);
+    painter.end();
+
+    const QFileInfo outputFile(filePath);
+    if (!outputFile.exists() || outputFile.size() == 0)
+        QMessageBox::warning(this, tr("Save as PDF"), tr("Could not create the PDF file."));
+}
+
 void MainWindow::revertImage()
 {
     if (!graphicsView->isImageModified())
@@ -1722,6 +1837,8 @@ void MainWindow::setupImageToolbar()
     thumbnailBarButton = addButton(actionToolTip(QStringLiteral("togglethumbnailbar")), true);
     fileInfoButton = addButton(actionToolTip(QStringLiteral("togglefileinfopanel")), true);
     trashButton = addButton(actionToolTip(QStringLiteral("delete")), false);
+    printButton = addButton(tr("Print"), false);
+    pdfButton = addButton(tr("Save as PDF…"), false);
     toolbarLayout->addStretch(1);
 
     restoreButton->setObjectName(QStringLiteral("restoreImageButton"));
@@ -1743,6 +1860,8 @@ void MainWindow::setupImageToolbar()
             &MainWindow::toggleThumbnailBarVisible);
     connect(fileInfoButton, &QToolButton::clicked, this, &MainWindow::toggleFileInfoPanelVisible);
     connect(trashButton, &QToolButton::clicked, this, [this]() { askDeleteFile(false, true); });
+    connect(printButton, &QToolButton::clicked, this, &MainWindow::printImage);
+    connect(pdfButton, &QToolButton::clicked, this, &MainWindow::exportPdf);
 
     imageToolbar->setStyleSheet(QStringLiteral(
             "QToolButton { border: none; border-radius: 5px; background: transparent; padding: 4px; }"
@@ -1788,6 +1907,8 @@ void MainWindow::updateImageToolbar()
     thumbnailBarButton->setIcon(icon(0xe413));
     fileInfoButton->setIcon(icon(0xe88e));
     trashButton->setIcon(icon(0xe872));
+    printButton->setIcon(icon(0xe8ad));
+    pdfButton->setIcon(icon(0xe415));
 
     thumbnailBarButton->setChecked(qvGetSettingInt(ThumbnailBarPosition) != 0);
     fileInfoButton->setChecked(qvGetSettingInt(FileInfoPanelPosition) != 0);
@@ -1796,6 +1917,8 @@ void MainWindow::updateImageToolbar()
     const bool canEdit = graphicsView->canEditStill();
     rotateRightButton->setEnabled(hasImage);
     trashButton->setEnabled(hasImage);
+    printButton->setEnabled(hasImage);
+    pdfButton->setEnabled(hasImage);
     cropButton->setEnabled(canEdit);
     compressButton->setEnabled(true);
     compressButton->setPopupMode(canEdit ? QToolButton::MenuButtonPopup : QToolButton::InstantPopup);

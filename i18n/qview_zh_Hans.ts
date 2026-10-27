@@ -612,6 +612,38 @@ No write permission or file is read-only.</source>
         <source>Batch compress…</source>
         <translation>批量压缩…</translation>
     </message>
+    <message>
+        <source>Print</source>
+        <translation>打印</translation>
+    </message>
+    <message>
+        <source>Save as PDF…</source>
+        <translation>另存为 PDF…</translation>
+    </message>
+    <message>
+        <source>Print Image</source>
+        <translation>打印图片</translation>
+    </message>
+    <message>
+        <source>Could not start printing.</source>
+        <translation>无法开始打印。</translation>
+    </message>
+    <message>
+        <source>Save as PDF</source>
+        <translation>另存为 PDF</translation>
+    </message>
+    <message>
+        <source>PDF Files (*.pdf)</source>
+        <translation>PDF 文件 (*.pdf)</translation>
+    </message>
+    <message>
+        <source>%1 already exists. Do you want to replace it?</source>
+        <translation>%1 已存在。是否替换？</translation>
+    </message>
+    <message>
+        <source>Could not create the PDF file.</source>
+        <translation>无法创建 PDF 文件。</translation>
+    </message>
 </context>
 <context>
     <name>OpenWith</name>

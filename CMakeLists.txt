@@ -28,14 +28,14 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # Find required Qt components
-find_package(Qt6 QUIET COMPONENTS Core Gui Network Widgets Svg)
+find_package(Qt6 QUIET COMPONENTS Core Gui Network Widgets Svg PrintSupport)
 if(Qt6_FOUND)
     set(QT_VERSION_MAJOR 6)
     set(QT_VERSION ${Qt6_VERSION})
     # Find optional tools
     find_package(Qt6 QUIET COMPONENTS LinguistTools)
 else()
-    set(QT5_FIND_COMPONENTS Core Gui Network Widgets Svg)
+    set(QT5_FIND_COMPONENTS Core Gui Network Widgets Svg PrintSupport)
     if(UNIX AND NOT APPLE)
         list(APPEND QT5_FIND_COMPONENTS X11Extras)
     endif()
@@ -149,7 +149,7 @@ if(WIN32)
 endif()
 add_executable(${PROJECT_NAME} ${EXECUTABLE_TYPE} ${PROJECT_SOURCES} ${PROJECT_HEADERS} ${PROJECT_FORMS} ${PROJECT_RESOURCES})
 
-target_link_libraries(${PROJECT_NAME} PRIVATE Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Svg)
+target_link_libraries(${PROJECT_NAME} PRIVATE Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Svg Qt${QT_VERSION_MAJOR}::PrintSupport)
 
 find_package(JPEG QUIET)
 if(JPEG_FOUND)
