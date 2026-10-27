@@ -644,6 +644,24 @@ No write permission or file is read-only.</source>
         <source>Could not create the PDF file.</source>
         <translation>无法创建 PDF 文件。</translation>
     </message>
+    <message>
+        <source>Could not rename %1:
+A file named %2 already exists.</source>
+        <translation>无法重命名%1：
+已存在同名文件 %2。</translation>
+    </message>
+    <message>
+        <source>Could not rename %1:
+No write permission or file is read-only.</source>
+        <translation>无法重命名%1：
+没有写入权限或文件只读。</translation>
+    </message>
+    <message>
+        <source>Could not rename %1:
+(Check that all characters are valid)</source>
+        <translation>无法重命名%1：
+（无效字符）</translation>
+    </message>
 </context>
 <context>
     <name>OpenWith</name>

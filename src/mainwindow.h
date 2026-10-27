@@ -85,6 +85,10 @@ public:
 
     void rename();
 
+    // Renames the current file to a new name in the same folder, used by the
+    // file info panel when its name row is edited in place
+    void renameCurrentFileTo(const QString &newFileName);
+
     void zoomIn();
 
     void zoomOut();

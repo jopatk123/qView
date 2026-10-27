@@ -11,6 +11,8 @@
 #include <QVBoxLayout>
 
 #include <QFileDialog>
+#include <QDir>
+#include <QFile>
 #include <QMessageBox>
 #include <QString>
 #include <QGraphicsPixmapItem>
@@ -181,6 +183,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     // Persistent file info, shown when the matching setting is not hidden
     fileInfoPanel = new QVFileInfoPanel(this);
     fileInfoPanel->hide();
+    connect(fileInfoPanel, &QVFileInfoPanel::fileNameEdited, this,
+            &MainWindow::renameCurrentFileTo);
 
     // Hide fullscreen label by default
     ui->fullscreenLabel->hide();
@@ -1168,15 +1172,64 @@ void MainWindow::rename()
     if (!getCurrentFileDetails().isPixmapLoaded)
         return;
 
-    auto *renameDialog = new QVRenameDialog(this, getCurrentFileDetails().fileInfo);
-    connect(renameDialog, &QVRenameDialog::newFileToOpen, this, &MainWindow::openFile);
-    connect(renameDialog, &QVRenameDialog::readyToRenameFile, this, [this]() {
-        if (auto device = graphicsView->getLoadedMovie().device()) {
-            device->close();
-        }
-    });
+    auto *renameDialog = new QVRenameDialog(this, getCurrentFileDetails().fileInfo.fileName());
+    connect(renameDialog, &QVRenameDialog::renameRequested, this,
+            &MainWindow::renameCurrentFileTo);
 
     renameDialog->open();
+}
+
+void MainWindow::renameCurrentFileTo(const QString &newFileName)
+{
+    const auto &fileDetails = getCurrentFileDetails();
+    if (!fileDetails.isPixmapLoaded)
+        return;
+
+    const QFileInfo fileInfo = fileDetails.fileInfo;
+    const QString trimmedName = newFileName.trimmed();
+    const QString oldFileName = fileInfo.fileName();
+    if (trimmedName.isEmpty() || trimmedName == oldFileName)
+        return;
+
+    const QString invalidNameMessage =
+            tr("Could not rename %1:\n(Check that all characters are valid)").arg(oldFileName);
+
+    if (trimmedName.contains(QLatin1Char('/')) || trimmedName.contains(QLatin1Char('\\'))
+        || trimmedName == QLatin1String(".") || trimmedName == QLatin1String("..")) {
+        QMessageBox::critical(this, tr("Error"), invalidNameMessage);
+        return;
+    }
+
+    const QString newFilePath =
+            QDir::cleanPath(fileInfo.absolutePath() + QDir::separator() + trimmedName);
+
+    // Only changing the case is valid even though the target "exists", because on a
+    // case-insensitive filesystem that existing file is the one being renamed
+    const bool caseOnlyChange =
+            newFilePath.compare(fileInfo.absoluteFilePath(), Qt::CaseInsensitive) == 0;
+    if (!caseOnlyChange && QFileInfo::exists(newFilePath)) {
+        QMessageBox::critical(this, tr("Error"),
+                              tr("Could not rename %1:\nA file named %2 already exists.")
+                                      .arg(oldFileName, trimmedName));
+        return;
+    }
+
+    if (!fileInfo.isWritable()) {
+        QMessageBox::critical(
+                this, tr("Error"),
+                tr("Could not rename %1:\nNo write permission or file is read-only.")
+                        .arg(oldFileName));
+        return;
+    }
+
+    // A playing movie keeps the file open, which blocks renaming it on Windows
+    if (auto device = graphicsView->getLoadedMovie().device())
+        device->close();
+
+    if (QFile::rename(fileInfo.absoluteFilePath(), newFilePath))
+        openFile(newFilePath);
+    else
+        QMessageBox::critical(this, tr("Error"), invalidNameMessage);
 }
 
 void MainWindow::zoomIn()

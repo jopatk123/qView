@@ -2,7 +2,10 @@
 #include "qvapplication.h"
 
 #include <QFormLayout>
+#include <QKeyEvent>
 #include <QLabel>
+#include <QLineEdit>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QScrollArea>
 #include <QVBoxLayout>
@@ -65,6 +68,14 @@ QVFileInfoPanel::QVFileInfoPanel(QWidget *parent) : QWidget(parent)
     framesValue = addRow(form, tr("Frames:"));
     framesKey = qobject_cast<QLabel *>(form->labelForField(framesValue));
 
+    // Double-clicking the name edits it in place. The editor covers the label
+    // instead of replacing it so the form row keeps its height while editing.
+    nameValue->installEventFilter(this);
+    nameEditor = new QLineEdit(formWidget);
+    nameEditor->hide();
+    nameEditor->installEventFilter(this);
+    connect(nameEditor, &QLineEdit::returnPressed, this, [this]() { finishNameEdit(true); });
+
     scrollArea = new QScrollArea(this);
     scrollArea->setWidgetResizable(true);
     scrollArea->setFrameShape(QFrame::NoFrame);
@@ -108,6 +119,11 @@ QLabel *QVFileInfoPanel::addRow(QFormLayout *form, const QString &labelText)
 
 void QVFileInfoPanel::setInfo(const QFileInfo &fileInfo, int width, int height, int frameCount)
 {
+    // Navigating to another file abandons an unfinished edit
+    if (editingName && fileInfo.absoluteFilePath() != currentFileInfo.absoluteFilePath())
+        finishNameEdit(false);
+
+    currentFileInfo = fileInfo;
     if (!fileInfo.isFile())
         fields = QVFileInfoFields();
     else
@@ -161,6 +177,9 @@ void QVFileInfoPanel::applyChrome()
         setFixedWidth(PANEL_WIDTH);
         setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
     } else {
+        // The bottom strip shows one merged line without a name field to edit
+        if (editingName)
+            finishNameEdit(false);
         box->setContentsMargins(TEXT_MARGIN, TEXT_MARGIN, TEXT_MARGIN, TEXT_MARGIN);
         const int height = fontMetrics().lineSpacing() * 2 + TEXT_MARGIN * 2;
         setFixedHeight(height);
@@ -188,6 +207,7 @@ void QVFileInfoPanel::applyPalette()
     scrollArea->setPalette(pal);
     scrollArea->viewport()->setPalette(pal);
     summaryLabel->setPalette(pal);
+    nameEditor->setPalette(pal);
 }
 
 void QVFileInfoPanel::updateText()
@@ -204,7 +224,14 @@ void QVFileInfoPanel::updateText()
                 keyWidth = qMax(keyWidth, key->sizeHint().width());
         }
         const int valueWidth = qMax(48, PANEL_WIDTH - TEXT_MARGIN * 2 - 12 - keyWidth);
-        showValue(nameValue, fields.name, valueWidth);
+        // While editing, the label stays empty so a resize can't repaint the old
+        // name underneath the editor
+        if (editingName) {
+            nameValue->setText(QString());
+            nameValue->setToolTip(currentFileInfo.fileName());
+        } else {
+            showValue(nameValue, fields.name, valueWidth);
+        }
         showValue(typeValue, fields.type, valueWidth);
         showValue(locationValue, fields.location, valueWidth);
         showValue(sizeValue, fields.size, valueWidth);
@@ -217,6 +244,8 @@ void QVFileInfoPanel::updateText()
             framesKey->setVisible(hasFrames);
         framesValue->setVisible(hasFrames);
         summaryLabel->setToolTip({});
+        if (editingName)
+            positionNameEditor();
         return;
     }
 
@@ -246,6 +275,88 @@ void QVFileInfoPanel::resizeEvent(QResizeEvent *event)
     updatingText = true;
     updateText();
     updatingText = false;
+}
+
+bool QVFileInfoPanel::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == nameValue && event->type() == QEvent::MouseButtonDblClick) {
+        if (vertical && currentFileInfo.isFile()
+            && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton) {
+            beginNameEdit();
+            return true;
+        }
+    } else if (watched == nameEditor) {
+        if (event->type() == QEvent::KeyPress
+            && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape) {
+            finishNameEdit(false);
+            return true;
+        }
+        if (event->type() == QEvent::ShortcutOverride) {
+            // Keep unmodified keys (arrows, digits) inside the editor instead of
+            // letting the window's navigation shortcuts fire while typing
+            const auto *keyEvent = static_cast<QKeyEvent *>(event);
+            const Qt::KeyboardModifiers commandModifiers =
+                    Qt::ControlModifier | Qt::MetaModifier | Qt::AltModifier;
+            if ((keyEvent->modifiers() & commandModifiers) == 0) {
+                event->accept();
+                return true;
+            }
+        }
+        if (event->type() == QEvent::FocusOut && editingName)
+            finishNameEdit(true);
+    }
+
+    return QWidget::eventFilter(watched, event);
+}
+
+void QVFileInfoPanel::beginNameEdit()
+{
+    if (editingName || !currentFileInfo.isFile())
+        return;
+
+    editingName = true;
+
+    // Clear the label while editing so no wrapped leftovers show under the editor,
+    // but freeze the row height so nothing in the form jumps around
+    nameValue->setMinimumHeight(nameValue->height());
+    nameValue->setText(QString());
+
+    const QString fileName = currentFileInfo.fileName();
+    nameEditor->setText(fileName);
+    positionNameEditor();
+    nameEditor->show();
+    nameEditor->raise();
+    nameEditor->setFocus(Qt::MouseFocusReason);
+
+    // Select the base name and leave the extension alone, like the rename dialog does
+    const int lastDot = fileName.lastIndexOf(QLatin1Char('.'));
+    if (lastDot > 0)
+        nameEditor->setSelection(0, lastDot);
+    else
+        nameEditor->selectAll();
+}
+
+void QVFileInfoPanel::finishNameEdit(bool commit)
+{
+    if (!editingName)
+        return;
+
+    editingName = false;
+    const QString newFileName = nameEditor->text().trimmed();
+    nameEditor->hide();
+
+    nameValue->setMinimumHeight(0);
+    updateText();
+
+    if (commit && !newFileName.isEmpty() && newFileName != currentFileInfo.fileName())
+        emit fileNameEdited(newFileName);
+}
+
+void QVFileInfoPanel::positionNameEditor()
+{
+    const QRect labelRect = nameValue->geometry();
+    const int editorHeight = qMax(labelRect.height(), nameEditor->sizeHint().height());
+    nameEditor->setGeometry(labelRect.x(), labelRect.y(), labelRect.width(), editorHeight);
 }
 
 void QVFileInfoPanel::paintEvent(QPaintEvent *event)

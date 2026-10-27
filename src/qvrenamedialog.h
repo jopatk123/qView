@@ -2,25 +2,21 @@
 #define QVRENAMEDIALOG_H
 
 #include <QInputDialog>
-#include <QFileInfo>
+#include <QString>
 
 class QVRenameDialog : public QInputDialog
 {
     Q_OBJECT
 public:
-    QVRenameDialog(QWidget *parent, QFileInfo fileInfo);
-
-    void onFinished(int result);
+    QVRenameDialog(QWidget *parent, const QString &fileName);
 
 signals:
-    void newFileToOpen(const QString &filePath);
-    void readyToRenameFile();
+    // The rename itself is done by the window so both renaming paths share the
+    // same validation and reload logic
+    void renameRequested(const QString &newFileName);
 
 protected:
     void showEvent(QShowEvent *event) override;
-
-private:
-    QFileInfo fileInfo;
 };
 
 #endif // QVRENAMEDIALOG_H
