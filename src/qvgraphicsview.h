@@ -27,6 +27,10 @@ public:
     void loadMimeData(const QMimeData *mimeData);
     void loadFile(const QString &fileName);
 
+    // Updates the open file's path after a rename. Still images stay as they are,
+    // including unsaved edits; a movie is reopened because its file was closed.
+    void retargetCurrentFile(const QString &newFilePath);
+
     void reloadFile();
 
     void zoomIn(const QPoint &pos = QPoint(-1, -1));

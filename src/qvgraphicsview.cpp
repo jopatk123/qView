@@ -414,6 +414,19 @@ void QVGraphicsView::loadFile(const QString &fileName)
     imageCore.loadFile(fileName);
 }
 
+void QVGraphicsView::retargetCurrentFile(const QString &newFilePath)
+{
+    const bool movie = imageCore.getCurrentFileDetails().isMovieLoaded;
+    imageCore.retargetCurrentFile(newFilePath);
+    if (movie) {
+        loadFile(newFilePath);
+        return;
+    }
+
+    qvApp->getActionManager().addFileToRecentsList(getCurrentFileDetails().fileInfo);
+    emit fileChanged();
+}
+
 void QVGraphicsView::reloadFile()
 {
     if (!getCurrentFileDetails().isPixmapLoaded)

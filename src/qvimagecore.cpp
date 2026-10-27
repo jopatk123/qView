@@ -244,6 +244,31 @@ void QVImageCore::loadPixmap(const ReadData &readData)
     requestCaching();
 }
 
+void QVImageCore::retargetCurrentFile(const QString &newFilePath)
+{
+    const QFileInfo newInfo(newFilePath);
+    // The old path is already gone, so identify the list entry by the index captured
+    // while that path still existed. Comparing QFileInfo objects here would miss it.
+    const int index = currentFileDetails.loadedIndexInFolder;
+    auto &files = currentFileDetails.folderFileInfoList;
+    if (index >= 0 && index < files.size()) {
+        files[index].absoluteFilePath = newInfo.absoluteFilePath();
+        files[index].fileName = newInfo.fileName();
+    }
+
+    currentFileDetails.fileInfo = newInfo;
+    if (index >= 0 && index < files.size())
+        currentFileDetails.updateLoadedIndexInFolder();
+    else
+        updateFolderInfo();
+
+    // The cache key includes the old path, so it no longer names this file.
+    if (!loadedCacheKey.isEmpty()) {
+        imageCache.remove(loadedCacheKey);
+        loadedCacheKey.clear();
+    }
+}
+
 void QVImageCore::closeImage()
 {
     currentFileDetails = getEmptyFileDetails();

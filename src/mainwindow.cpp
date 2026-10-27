@@ -1203,11 +1203,12 @@ void MainWindow::renameCurrentFileTo(const QString &newFileName)
     const QString newFilePath =
             QDir::cleanPath(fileInfo.absolutePath() + QDir::separator() + trimmedName);
 
-    // Only changing the case is valid even though the target "exists", because on a
-    // case-insensitive filesystem that existing file is the one being renamed
-    const bool caseOnlyChange =
-            newFilePath.compare(fileInfo.absoluteFilePath(), Qt::CaseInsensitive) == 0;
-    if (!caseOnlyChange && QFileInfo::exists(newFilePath)) {
+    // Changing only the case still "exists" on a case-insensitive volume, because
+    // that file is the one being renamed. QFileInfo comparison follows the volume's
+    // own case rules, so a different file on a case-sensitive volume is refused
+    // here. rename() would otherwise replace that file.
+    const QFileInfo destination(newFilePath);
+    if (destination.exists() && destination != fileInfo) {
         QMessageBox::critical(this, tr("Error"),
                               tr("Could not rename %1:\nA file named %2 already exists.")
                                       .arg(oldFileName, trimmedName));
@@ -1222,14 +1223,24 @@ void MainWindow::renameCurrentFileTo(const QString &newFileName)
         return;
     }
 
+    const bool wasMovie = fileDetails.isMovieLoaded;
+    const QString oldFilePath = fileInfo.absoluteFilePath();
     // A playing movie keeps the file open, which blocks renaming it on Windows
-    if (auto device = graphicsView->getLoadedMovie().device())
-        device->close();
+    if (wasMovie) {
+        if (auto device = graphicsView->getLoadedMovie().device())
+            device->close();
+    }
 
-    if (QFile::rename(fileInfo.absoluteFilePath(), newFilePath))
-        openFile(newFilePath);
-    else
+    if (!QFile::rename(oldFilePath, newFilePath)) {
+        if (wasMovie)
+            openFile(oldFilePath);
         QMessageBox::critical(this, tr("Error"), invalidNameMessage);
+        return;
+    }
+
+    // Reload would discard unsaved crops, rotations, and compression. Movies have
+    // to be reopened because the file handle was closed above.
+    graphicsView->retargetCurrentFile(newFilePath);
 }
 
 void MainWindow::zoomIn()

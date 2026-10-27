@@ -85,6 +85,9 @@ public:
     explicit QVImageCore(QObject *parent = nullptr);
 
     void loadFile(const QString &fileName, bool isReloading = false);
+    // The current file was renamed in its folder. Keeps the pixels, edits, and
+    // folder order already on screen, and only updates the path those belong to.
+    void retargetCurrentFile(const QString &newFilePath);
     ReadData readFile(const QString &fileName, const QColorSpace &targetColorSpace);
     void loadPixmap(const ReadData &readData);
     void closeImage();
