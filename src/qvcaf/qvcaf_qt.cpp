@@ -83,8 +83,19 @@ QtFillResult fillImage(const QImage &source, const QRect &holeRect, const FillOp
             mask[static_cast<size_t>(y) * w + static_cast<size_t>(x)] = 1;
     }
 
+    // Rectangular selection stays a binary hole for PatchMatch; edge fusion
+    // (wider feather, boundary color match, soft known-neighbor pull) runs in core.
+    // Defaults on FillOptions already bias toward quality; only fill missing overrides.
+    FillOptions opts = options;
+    if (opts.featherWidth < 0)
+        opts.featherWidth = 4;
+    if (opts.softEdgeWidth < 0)
+        opts.softEdgeWidth = 3;
+    if (opts.harmonizeStrength <= 0.f)
+        opts.harmonizeStrength = 1.25f;
+
     std::vector<uint8_t> out;
-    result.error = fill(rgba.data(), mask.data(), w, h, out, options);
+    result.error = fill(rgba.data(), mask.data(), w, h, out, opts);
     if (result.error != FillError::Ok || out.size() != static_cast<size_t>(n) * 4)
         return result;
 
