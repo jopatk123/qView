@@ -142,13 +142,19 @@ void QVGraphicsView::enterEvent(QEnterEvent *event)
 #endif
 {
     QGraphicsView::enterEvent(event);
-    viewport()->setCursor(cropMode ? Qt::CrossCursor : Qt::ArrowCursor);
+    viewport()->setCursor((cropMode || fillSelectMode) ? Qt::CrossCursor : Qt::ArrowCursor);
 }
 
 void QVGraphicsView::mousePressEvent(QMouseEvent *event)
 {
     if (cropMode && event->button() == Qt::RightButton) {
         cancelCrop();
+        event->accept();
+        return;
+    }
+
+    if (fillSelectMode && event->button() == Qt::RightButton) {
+        cancelFillSelect();
         event->accept();
         return;
     }
@@ -160,6 +166,17 @@ void QVGraphicsView::mousePressEvent(QMouseEvent *event)
             cropRubberBand = new QRubberBand(QRubberBand::Rectangle, viewport());
         cropRubberBand->setGeometry(QRect(cropOrigin, QSize(1, 1)));
         cropRubberBand->show();
+        event->accept();
+        return;
+    }
+
+    if (fillSelectMode && event->button() == Qt::LeftButton && canEditStill()) {
+        fillDragging = true;
+        fillOrigin = event->pos();
+        if (!fillRubberBand)
+            fillRubberBand = new QRubberBand(QRubberBand::Rectangle, viewport());
+        fillRubberBand->setGeometry(QRect(fillOrigin, QSize(1, 1)));
+        fillRubberBand->show();
         event->accept();
         return;
     }
@@ -230,6 +247,16 @@ void QVGraphicsView::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
+    if (fillDragging && fillRubberBand) {
+        const QRect imageOnView =
+                mapFromScene(loadedPixmapItem->sceneBoundingRect()).boundingRect();
+        const QRect selection =
+                QRect(fillOrigin, event->pos()).normalized().intersected(imageOnView);
+        fillRubberBand->setGeometry(selection);
+        event->accept();
+        return;
+    }
+
     if (mousePressButton == Qt::LeftButton) {
         if (mousePressModifiers.testFlag(Qt::ControlModifier)
             && !event->modifiers().testFlag(Qt::ControlModifier)) {
@@ -264,10 +291,24 @@ void QVGraphicsView::mouseReleaseEvent(QMouseEvent *event)
         return;
     }
 
+    if (fillDragging && event->button() == Qt::LeftButton) {
+        fillDragging = false;
+        const QRect selection = fillRubberBand ? fillRubberBand->geometry() : QRect();
+        if (fillRubberBand)
+            fillRubberBand->hide();
+        const QRect pixels = pixmapRectForViewportRect(selection);
+        if (pixels.width() >= 2 && pixels.height() >= 2) {
+            cancelFillSelect();
+            emit fillSelectionReady(pixels);
+        }
+        event->accept();
+        return;
+    }
+
     mousePressButton = Qt::NoButton;
     mousePressModifiers = Qt::NoModifier;
     QGraphicsView::mouseReleaseEvent(event);
-    viewport()->setCursor(Qt::ArrowCursor);
+    viewport()->setCursor((cropMode || fillSelectMode) ? Qt::CrossCursor : Qt::ArrowCursor);
 }
 
 bool QVGraphicsView::event(QEvent *event)
@@ -438,6 +479,7 @@ void QVGraphicsView::reloadFile()
 void QVGraphicsView::postLoad()
 {
     cancelCrop();
+    cancelFillSelect();
     updateLoadedPixmapItem();
     qvApp->getActionManager().addFileToRecentsList(getCurrentFileDetails().fileInfo);
 
@@ -857,6 +899,8 @@ void QVGraphicsView::settingsUpdated()
 
 void QVGraphicsView::closeImage()
 {
+    cancelCrop();
+    cancelFillSelect();
     imageCore.closeImage();
 }
 
@@ -878,18 +922,21 @@ void QVGraphicsView::setSpeed(const int &desiredSpeed)
 void QVGraphicsView::rotateImage(int rotation)
 {
     cancelCrop();
+    cancelFillSelect();
     imageCore.rotateImage(rotation);
 }
 
 void QVGraphicsView::mirrorImage()
 {
     cancelCrop();
+    cancelFillSelect();
     imageCore.mirrorImage();
 }
 
 void QVGraphicsView::flipImage()
 {
     cancelCrop();
+    cancelFillSelect();
     imageCore.flipImage();
 }
 
@@ -898,6 +945,7 @@ bool QVGraphicsView::beginCrop()
     if (!canEditStill())
         return false;
 
+    cancelFillSelect();
     cropMode = true;
     cropDragging = false;
     setDragMode(QGraphicsView::NoDrag);
@@ -916,32 +964,76 @@ void QVGraphicsView::cancelCrop()
     cropDragging = false;
     if (cropRubberBand)
         cropRubberBand->hide();
-    setDragMode(QGraphicsView::ScrollHandDrag);
-    viewport()->setCursor(Qt::ArrowCursor);
+    if (!fillSelectMode) {
+        setDragMode(QGraphicsView::ScrollHandDrag);
+        viewport()->setCursor(Qt::ArrowCursor);
+    }
     emit cropModeChanged(false);
+}
+
+bool QVGraphicsView::beginFillSelect()
+{
+    if (!canEditStill())
+        return false;
+
+    cancelCrop();
+    fillSelectMode = true;
+    fillDragging = false;
+    setDragMode(QGraphicsView::NoDrag);
+    viewport()->setCursor(Qt::CrossCursor);
+    setFocus(Qt::OtherFocusReason);
+    emit fillSelectModeChanged(true);
+    return true;
+}
+
+void QVGraphicsView::cancelFillSelect()
+{
+    if (!fillSelectMode && !fillDragging)
+        return;
+
+    fillSelectMode = false;
+    fillDragging = false;
+    if (fillRubberBand)
+        fillRubberBand->hide();
+    if (!cropMode) {
+        setDragMode(QGraphicsView::ScrollHandDrag);
+        viewport()->setCursor(Qt::ArrowCursor);
+    }
+    emit fillSelectModeChanged(false);
+}
+
+void QVGraphicsView::applyContentAwareResult(const QImage &image)
+{
+    cancelFillSelect();
+    cancelCrop();
+    imageCore.applyContentAwareResult(image);
 }
 
 bool QVGraphicsView::compressImage(const QSize &targetSize, int quality)
 {
     cancelCrop();
+    cancelFillSelect();
     return imageCore.compressImage(targetSize, quality);
 }
 
 bool QVGraphicsView::applyCompression(const QVImageCore::CompressionOutput &output, int quality)
 {
     cancelCrop();
+    cancelFillSelect();
     return imageCore.applyCompression(output, quality);
 }
 
 QString QVGraphicsView::saveOverOriginal()
 {
     cancelCrop();
+    cancelFillSelect();
     return imageCore.saveOverOriginal();
 }
 
 void QVGraphicsView::revertEdits()
 {
     cancelCrop();
+    cancelFillSelect();
     imageCore.revertEdits();
 }
 

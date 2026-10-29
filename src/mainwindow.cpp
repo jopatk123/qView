@@ -6,6 +6,8 @@
 #include "qvthumbnailbar.h"
 #include "qvfileinfopanel.h"
 #include "qvbatchcompressdialog.h"
+#include "qvcaf_qt.h"
+#include "qvcaf.h"
 
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -199,6 +201,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(graphicsView, &QVGraphicsView::cropModeChanged, this, [this](bool) {
         updateImageToolbar();
     });
+    connect(graphicsView, &QVGraphicsView::fillSelectModeChanged, this, [this](bool) {
+        updateImageToolbar();
+    });
+    connect(graphicsView, &QVGraphicsView::fillSelectionReady, this,
+            &MainWindow::onFillSelectionReady);
     connect(graphicsView, &QVGraphicsView::updatedLoadedPixmapItem, this,
             &MainWindow::setWindowSize);
     connect(graphicsView, &QVGraphicsView::cancelSlideshow, this, &MainWindow::cancelSlideshow);
@@ -208,6 +215,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(escShortcut, &QShortcut::activated, this, [this]() {
         if (graphicsView->isCropping()) {
             graphicsView->cancelCrop();
+            return;
+        }
+        if (graphicsView->isFillSelecting()) {
+            graphicsView->cancelFillSelect();
             return;
         }
         if (windowState().testFlag(Qt::WindowFullScreen))
@@ -1401,10 +1412,130 @@ void MainWindow::revertImage()
 
 void MainWindow::cropImage()
 {
+    if (graphicsView->isFillSelecting())
+        graphicsView->cancelFillSelect();
     if (graphicsView->isCropping())
         graphicsView->cancelCrop();
     else if (!graphicsView->beginCrop())
         cropButton->setChecked(false);
+}
+
+void MainWindow::contentAwareFill()
+{
+    if (cafRunning)
+        return;
+
+    if (graphicsView->isFillSelecting()) {
+        graphicsView->cancelFillSelect();
+        return;
+    }
+
+    if (graphicsView->isCropping())
+        graphicsView->cancelCrop();
+
+    if (!graphicsView->canEditStill()) {
+        if (cafButton)
+            cafButton->setChecked(false);
+        return;
+    }
+
+    if (!graphicsView->beginFillSelect()) {
+        if (cafButton)
+            cafButton->setChecked(false);
+    }
+}
+
+void MainWindow::onFillSelectionReady(const QRect &imageRect)
+{
+    if (cafRunning)
+        return;
+    if (!graphicsView->canEditStill())
+        return;
+
+    const QSize imageSize = graphicsView->getLoadedPixmap().size();
+    const int holePixels = qvcaf::countHolePixels(imageSize, imageRect);
+    if (holePixels <= 0) {
+        QMessageBox::information(this, tr("智能填充"), tr("请拖出有效的矩形选区。"));
+        return;
+    }
+
+    if (holePixels > qvcaf::kConfirmHole) {
+        const auto answer = QMessageBox::question(
+                this, tr("智能填充"),
+                tr("选区约有 %1 个像素，填充可能较慢。是否继续？")
+                        .arg(QLocale().toString(holePixels)),
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes)
+            return;
+    }
+
+    runContentAwareFill(imageRect);
+}
+
+void MainWindow::runContentAwareFill(const QRect &imageRect)
+{
+    if (cafRunning || !graphicsView->canEditStill())
+        return;
+
+    const QImage source = graphicsView->getLoadedPixmap().toImage();
+    if (source.isNull())
+        return;
+
+    cafRunning = true;
+    updateImageToolbar();
+
+    auto *progress = new QProgressDialog(tr("正在智能填充…"), tr("取消"), 0, 100, this);
+    progress->setWindowModality(Qt::WindowModal);
+    progress->setMinimumDuration(0);
+    progress->setValue(0);
+    progress->setAutoClose(false);
+    progress->setAutoReset(false);
+
+    auto *watcher = new QFutureWatcher<qvcaf::QtFillResult>(this);
+
+    const QRect hole = imageRect;
+    watcher->setFuture(QtConcurrent::run([source, hole, progress]() {
+        qvcaf::FillOptions options;
+        options.onProgress = [progress](int percent) {
+            QMetaObject::invokeMethod(progress, "setValue", Qt::QueuedConnection,
+                                      Q_ARG(int, percent));
+        };
+        return qvcaf::fillImage(source, hole, options);
+    }));
+
+    connect(progress, &QProgressDialog::canceled, this, [watcher]() {
+        Q_UNUSED(watcher);
+    });
+
+    connect(watcher, &QFutureWatcher<qvcaf::QtFillResult>::finished, this,
+            [this, watcher, progress]() {
+                progress->reset();
+                progress->deleteLater();
+                const qvcaf::QtFillResult result = watcher->result();
+                watcher->deleteLater();
+
+                cafRunning = false;
+                updateImageToolbar();
+
+                if (result.error != qvcaf::FillError::Ok || result.image.isNull()) {
+                    QString message;
+                    switch (result.error) {
+                    case qvcaf::FillError::Empty:
+                        message = tr("选区内没有需要填充的像素。");
+                        break;
+                    case qvcaf::FillError::NoContext:
+                        message = tr("周围可用纹理不足，无法填充。");
+                        break;
+                    default:
+                        message = tr("智能填充失败。");
+                        break;
+                    }
+                    QMessageBox::warning(this, tr("智能填充"), message);
+                    return;
+                }
+
+                graphicsView->applyContentAwareResult(result.image);
+            });
 }
 
 void MainWindow::compressImage()
@@ -1891,6 +2022,7 @@ void MainWindow::setupImageToolbar()
     compressResultLabel->setAlignment(Qt::AlignVCenter);
     toolbarLayout->addWidget(compressResultLabel);
     cropButton = addButton(tr("Crop"), true);
+    cafButton = addButton(tr("智能填充"), true);
     compressButton = addButton(tr("Compress"), false);
     auto *compressMenu = new QMenu(compressButton);
     compressCurrentAction = compressMenu->addAction(tr("Compress this image"));
@@ -1910,12 +2042,14 @@ void MainWindow::setupImageToolbar()
     saveButton->setObjectName(QStringLiteral("saveImageButton"));
     saveButton->setVisible(false);
     cropButton->setEnabled(false);
+    cafButton->setEnabled(false);
     compressButton->setEnabled(true);
 
     connect(openButton, &QToolButton::clicked, this, [this]() { qvApp->pickFile(this); });
     connect(restoreButton, &QToolButton::clicked, this, &MainWindow::revertImage);
     connect(saveButton, &QToolButton::clicked, this, &MainWindow::saveImage);
     connect(cropButton, &QToolButton::clicked, this, &MainWindow::cropImage);
+    connect(cafButton, &QToolButton::clicked, this, &MainWindow::contentAwareFill);
     connect(compressButton, &QToolButton::clicked, this, &MainWindow::compressImage);
     connect(compressCurrentAction, &QAction::triggered, this, &MainWindow::compressImage);
     connect(batchCompressAction, &QAction::triggered, this, &MainWindow::batchCompress);
@@ -1966,6 +2100,7 @@ void MainWindow::updateImageToolbar()
                                             QChar(0xe161), kImageToolbarIconSize, ratio,
                                             QColor(0xE5, 0x39, 0x35)));
     cropButton->setIcon(icon(0xe3be));
+    cafButton->setIcon(icon(0xe3e9)); // auto_fix
     compressButton->setIcon(icon(0xe94d));
     rotateRightButton->setIcon(icon(0xe41a));
     thumbnailBarButton->setIcon(icon(0xe413));
@@ -1983,7 +2118,8 @@ void MainWindow::updateImageToolbar()
     trashButton->setEnabled(hasImage);
     printButton->setEnabled(hasImage);
     pdfButton->setEnabled(hasImage);
-    cropButton->setEnabled(canEdit);
+    cropButton->setEnabled(canEdit && !cafRunning);
+    cafButton->setEnabled(canEdit && !cafRunning);
     compressButton->setEnabled(true);
     compressButton->setPopupMode(canEdit ? QToolButton::MenuButtonPopup : QToolButton::InstantPopup);
     if (compressCurrentAction)
@@ -1992,6 +2128,13 @@ void MainWindow::updateImageToolbar()
     cropButton->setChecked(graphicsView->isCropping());
     cropButton->setToolTip(graphicsView->isCropping() ? tr("Drag to select the area to keep.")
                                                       : tr("Crop"));
+    cafButton->setChecked(graphicsView->isFillSelecting());
+    if (cafRunning)
+        cafButton->setToolTip(tr("正在智能填充…"));
+    else if (graphicsView->isFillSelecting())
+        cafButton->setToolTip(tr("拖出要去除/填充的矩形区域，右键或 Esc 取消。"));
+    else
+        cafButton->setToolTip(tr("智能填充：拖出矩形选区，用周围纹理填补。"));
     const bool modified = graphicsView->isImageModified();
     restoreButton->setVisible(modified);
     saveButton->setVisible(modified);

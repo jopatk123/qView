@@ -9,6 +9,7 @@
 #include <QTimer>
 #include <QFileInfo>
 #include <QRubberBand>
+#include <QImage>
 
 class QVGraphicsView : public QGraphicsView
 {
@@ -59,6 +60,11 @@ public:
     bool beginCrop();
     void cancelCrop();
     bool isCropping() const { return cropMode; }
+    // Content-aware fill: drag a rectangle; hole = selection, known = outside.
+    bool beginFillSelect();
+    void cancelFillSelect();
+    bool isFillSelecting() const { return fillSelectMode; }
+    void applyContentAwareResult(const QImage &image);
     bool compressImage(const QSize &targetSize, int quality);
     bool applyCompression(const QVImageCore::CompressionOutput &output, int quality);
     QByteArray originalFormat() const { return imageCore.originalFormat(); }
@@ -85,6 +91,11 @@ signals:
     void imageStateChanged();
 
     void cropModeChanged(bool active);
+
+    void fillSelectModeChanged(bool active);
+
+    // Pixmap-space rectangle ready for content-aware fill (nonzero hole).
+    void fillSelectionReady(const QRect &imageRect);
 
 protected:
     void wheelEvent(QWheelEvent *event) override;
@@ -164,5 +175,10 @@ private:
     bool cropDragging = false;
     QPoint cropOrigin;
     QRubberBand *cropRubberBand = nullptr;
+
+    bool fillSelectMode = false;
+    bool fillDragging = false;
+    QPoint fillOrigin;
+    QRubberBand *fillRubberBand = nullptr;
 };
 #endif // QVGRAPHICSVIEW_H

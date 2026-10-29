@@ -115,6 +115,8 @@ public:
 
     void cropImage();
 
+    void contentAwareFill();
+
     void compressImage();
 
     void batchCompress();
@@ -206,6 +208,8 @@ private:
     QToolButton *saveButton = nullptr;
     QLabel *compressResultLabel = nullptr;
     QToolButton *cropButton = nullptr;
+    QToolButton *cafButton = nullptr;
+    bool cafRunning = false;
     QToolButton *compressButton = nullptr;
     QAction *compressCurrentAction = nullptr;
     QToolButton *rotateRightButton = nullptr;
@@ -247,6 +251,10 @@ private:
     void setupImageToolbar();
 
     void updateImageToolbar();
+
+    void onFillSelectionReady(const QRect &imageRect);
+
+    void runContentAwareFill(const QRect &imageRect);
 
     void rememberVisiblePanels();
 
