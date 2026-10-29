@@ -6,6 +6,8 @@
 #include "qvthumbnailbar.h"
 #include "qvfileinfopanel.h"
 #include "qvbatchcompressdialog.h"
+#include "qvcaf_qt.h"
+#include "qvcaf.h"
 
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -14,6 +16,9 @@
 #include <QDir>
 #include <QFile>
 #include <QMessageBox>
+#include <QThread>
+#include <QFileInfo>
+#include <QDebug>
 #include <QString>
 #include <QGraphicsPixmapItem>
 #include <QPixmap>
@@ -199,6 +204,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(graphicsView, &QVGraphicsView::cropModeChanged, this, [this](bool) {
         updateImageToolbar();
     });
+    connect(graphicsView, &QVGraphicsView::fillSelectModeChanged, this, [this](bool) {
+        updateImageToolbar();
+    });
+    connect(graphicsView, &QVGraphicsView::fillSelectionReady, this,
+            &MainWindow::onFillSelectionReady);
     connect(graphicsView, &QVGraphicsView::updatedLoadedPixmapItem, this,
             &MainWindow::setWindowSize);
     connect(graphicsView, &QVGraphicsView::cancelSlideshow, this, &MainWindow::cancelSlideshow);
@@ -208,6 +218,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(escShortcut, &QShortcut::activated, this, [this]() {
         if (graphicsView->isCropping()) {
             graphicsView->cancelCrop();
+            return;
+        }
+        if (graphicsView->isFillSelecting()) {
+            graphicsView->cancelFillSelect();
             return;
         }
         if (windowState().testFlag(Qt::WindowFullScreen))
@@ -1399,12 +1413,252 @@ void MainWindow::revertImage()
     graphicsView->revertEdits();
 }
 
+int MainWindow::runCafSelfTest(const QString &imagePath)
+{
+    openFile(imagePath);
+    for (int i = 0; i < 100; ++i) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        if (graphicsView->canEditStill()
+            && graphicsView->getCurrentFileDetails().fileInfo.absoluteFilePath()
+                    == QFileInfo(imagePath).absoluteFilePath())
+            break;
+        QThread::msleep(50);
+    }
+    // Extra settle so no stale loader can replace the pixmap mid-test.
+    for (int i = 0; i < 10; ++i) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QThread::msleep(20);
+    }
+    if (!graphicsView->canEditStill()) {
+        qWarning().nospace() << "CAF self-test: image not editable"
+                             << " loaded=" << graphicsView->getCurrentFileDetails().isPixmapLoaded
+                             << " movie=" << graphicsView->getCurrentFileDetails().isMovieLoaded
+                             << " path=" << graphicsView->getCurrentFileDetails().fileInfo.absoluteFilePath();
+        return 10;
+    }
+
+    const QSize beforeSize = graphicsView->getLoadedPixmap().size();
+    const QImage before = graphicsView->getLoadedPixmap().toImage().convertToFormat(QImage::Format_ARGB32);
+
+    // Detect cyan hole #28b4dc-ish
+    int minX = before.width(), minY = before.height(), maxX = -1, maxY = -1;
+    for (int y = 0; y < before.height(); ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(before.constScanLine(y));
+        for (int x = 0; x < before.width(); ++x) {
+            const int r = qRed(line[x]), g = qGreen(line[x]), b = qBlue(line[x]);
+            if (r < 80 && g >= 160 && g <= 200 && b >= 200) {
+                minX = qMin(minX, x);
+                minY = qMin(minY, y);
+                maxX = qMax(maxX, x);
+                maxY = qMax(maxY, y);
+            }
+        }
+    }
+    if (maxX < 0) {
+        qWarning("CAF self-test: no cyan hole");
+        return 11;
+    }
+    const QRect hole(minX, minY, maxX - minX + 1, maxY - minY + 1);
+    qInfo().nospace() << "CAF self-test: hole=" << hole << " image=" << beforeSize;
+
+    // Ensure we are NOT in crop; enter fill via the same path as the toolbar.
+    if (graphicsView->isCropping())
+        graphicsView->cancelCrop();
+    if (graphicsView->isFillSelecting())
+        graphicsView->cancelFillSelect();
+    if (!graphicsView->beginFillSelect()) {
+        qWarning("CAF self-test: beginFillSelect failed");
+        return 12;
+    }
+    if (graphicsView->isCropping()) {
+        qWarning("CAF self-test: crop still active after beginFillSelect");
+        return 13;
+    }
+
+    const QRect emitted = graphicsView->simulateFillDrag(hole);
+    if (emitted.isEmpty()) {
+        qWarning("CAF self-test: fillSelectionReady NOT emitted (bug: likely cropped instead)");
+        const QSize afterDrag = graphicsView->getLoadedPixmap().size();
+        if (afterDrag != beforeSize) {
+            qWarning().nospace() << "CAF self-test: size changed after drag " << beforeSize
+                                 << " -> " << afterDrag << " (crop path)";
+            return 14;
+        }
+        return 15;
+    }
+    qInfo().nospace() << "CAF self-test: fillSelectionReady " << emitted
+                      << " cafRunning=" << cafRunning;
+
+    // Wait for async fill (finished is queued to GUI thread).
+    if (!cafRunning) {
+        qWarning("CAF self-test: cafRunning false right after emit — fill never started?");
+        return 18;
+    }
+    for (int i = 0; i < 600 && cafRunning; ++i) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QThread::msleep(20);
+    }
+    for (int i = 0; i < 20; ++i) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QThread::msleep(20);
+    }
+    qInfo().nospace() << "CAF self-test: after wait cafRunning=" << cafRunning
+                      << " modified=" << graphicsView->isImageModified();
+
+    const QSize afterSize = graphicsView->getLoadedPixmap().size();
+    if (afterSize != beforeSize) {
+        qWarning().nospace() << "CAF self-test: FAIL size " << beforeSize << " -> " << afterSize;
+        return 16;
+    }
+
+    const QImage after = graphicsView->getLoadedPixmap().toImage().convertToFormat(QImage::Format_ARGB32);
+    const QRgb center = after.pixel(hole.center());
+    const int r = qRed(center), g = qGreen(center), b = qBlue(center);
+    if (r < 80 && g >= 160 && g <= 200 && b >= 200) {
+        qWarning("CAF self-test: hole center still cyan");
+        return 17;
+    }
+
+    qInfo("CAF self-test: PASS");
+    return 0;
+}
+
 void MainWindow::cropImage()
 {
+    if (graphicsView->isFillSelecting())
+        graphicsView->cancelFillSelect();
     if (graphicsView->isCropping())
         graphicsView->cancelCrop();
     else if (!graphicsView->beginCrop())
         cropButton->setChecked(false);
+}
+
+void MainWindow::contentAwareFill()
+{
+    if (cafRunning)
+        return;
+
+    if (graphicsView->isFillSelecting()) {
+        graphicsView->cancelFillSelect();
+        return;
+    }
+
+    if (graphicsView->isCropping())
+        graphicsView->cancelCrop();
+
+    if (!graphicsView->canEditStill()) {
+        if (cafButton)
+            cafButton->setChecked(false);
+        return;
+    }
+
+    if (!graphicsView->beginFillSelect()) {
+        if (cafButton)
+            cafButton->setChecked(false);
+    }
+}
+
+void MainWindow::onFillSelectionReady(const QRect &imageRect)
+{
+    if (qEnvironmentVariableIsSet("QV_CAF_DEBUG")) {
+        qInfo().nospace() << "CAF: onFillSelectionReady rect=" << imageRect
+                          << " size=" << graphicsView->getLoadedPixmap().size();
+    }
+    if (cafRunning)
+        return;
+    if (!graphicsView->canEditStill())
+        return;
+
+    const QSize imageSize = graphicsView->getLoadedPixmap().size();
+    const int holePixels = qvcaf::countHolePixels(imageSize, imageRect);
+    if (holePixels <= 0) {
+        QMessageBox::information(this, tr("智能填充"), tr("请拖出有效的矩形选区。"));
+        return;
+    }
+
+    if (holePixels > qvcaf::kConfirmHole) {
+        const auto answer = QMessageBox::question(
+                this, tr("智能填充"),
+                tr("选区约有 %1 个像素，填充可能较慢。是否继续？")
+                        .arg(QLocale().toString(holePixels)),
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes)
+            return;
+    }
+
+    runContentAwareFill(imageRect);
+}
+
+void MainWindow::runContentAwareFill(const QRect &imageRect)
+{
+    if (cafRunning || !graphicsView->canEditStill())
+        return;
+
+    const QImage source = graphicsView->getLoadedPixmap().toImage();
+    if (source.isNull())
+        return;
+
+    cafRunning = true;
+    updateImageToolbar();
+
+    auto *progress = new QProgressDialog(tr("正在智能填充…"), tr("取消"), 0, 100, this);
+    progress->setWindowModality(Qt::WindowModal);
+    progress->setMinimumDuration(0);
+    progress->setValue(0);
+    progress->setAutoClose(false);
+    progress->setAutoReset(false);
+
+    auto *watcher = new QFutureWatcher<qvcaf::QtFillResult>(this);
+
+    connect(progress, &QProgressDialog::canceled, this, [watcher]() {
+        Q_UNUSED(watcher);
+    });
+
+    // Connect finished BEFORE setFuture — a small hole can finish in the same
+    // tick and would otherwise drop the result (never apply, looks like a no-op).
+    connect(watcher, &QFutureWatcher<qvcaf::QtFillResult>::finished, this,
+            [this, watcher, progress]() {
+                progress->reset();
+                progress->deleteLater();
+                const qvcaf::QtFillResult result = watcher->result();
+                watcher->deleteLater();
+
+                cafRunning = false;
+                updateImageToolbar();
+
+                if (result.error != qvcaf::FillError::Ok || result.image.isNull()) {
+                    QString message;
+                    switch (result.error) {
+                    case qvcaf::FillError::Empty:
+                        message = tr("选区内没有需要填充的像素。");
+                        break;
+                    case qvcaf::FillError::NoContext:
+                        message = tr("周围可用纹理不足，无法填充。");
+                        break;
+                    default:
+                        message = tr("智能填充失败。");
+                        break;
+                    }
+                    QMessageBox::warning(this, tr("智能填充"), message);
+                    return;
+                }
+
+                if (qEnvironmentVariableIsSet("QV_CAF_DEBUG")) {
+                    qInfo().nospace() << "CAF: apply result size=" << result.image.size()
+                                      << " err=" << int(result.error);
+                }
+                graphicsView->applyContentAwareResult(result.image);
+            });
+
+    const QRect hole = imageRect;
+    watcher->setFuture(QtConcurrent::run([source, hole, progress]() {
+        qvcaf::FillOptions options;
+        options.onProgress = [progress](int percent) {
+            QMetaObject::invokeMethod(progress, "setValue", Qt::QueuedConnection,
+                                      Q_ARG(int, percent));
+        };
+        return qvcaf::fillImage(source, hole, options);
+    }));
 }
 
 void MainWindow::compressImage()
@@ -1891,6 +2145,7 @@ void MainWindow::setupImageToolbar()
     compressResultLabel->setAlignment(Qt::AlignVCenter);
     toolbarLayout->addWidget(compressResultLabel);
     cropButton = addButton(tr("Crop"), true);
+    cafButton = addButton(tr("智能填充"), true);
     compressButton = addButton(tr("Compress"), false);
     auto *compressMenu = new QMenu(compressButton);
     compressCurrentAction = compressMenu->addAction(tr("Compress this image"));
@@ -1910,12 +2165,14 @@ void MainWindow::setupImageToolbar()
     saveButton->setObjectName(QStringLiteral("saveImageButton"));
     saveButton->setVisible(false);
     cropButton->setEnabled(false);
+    cafButton->setEnabled(false);
     compressButton->setEnabled(true);
 
     connect(openButton, &QToolButton::clicked, this, [this]() { qvApp->pickFile(this); });
     connect(restoreButton, &QToolButton::clicked, this, &MainWindow::revertImage);
     connect(saveButton, &QToolButton::clicked, this, &MainWindow::saveImage);
     connect(cropButton, &QToolButton::clicked, this, &MainWindow::cropImage);
+    connect(cafButton, &QToolButton::clicked, this, &MainWindow::contentAwareFill);
     connect(compressButton, &QToolButton::clicked, this, &MainWindow::compressImage);
     connect(compressCurrentAction, &QAction::triggered, this, &MainWindow::compressImage);
     connect(batchCompressAction, &QAction::triggered, this, &MainWindow::batchCompress);
@@ -1966,6 +2223,7 @@ void MainWindow::updateImageToolbar()
                                             QChar(0xe161), kImageToolbarIconSize, ratio,
                                             QColor(0xE5, 0x39, 0x35)));
     cropButton->setIcon(icon(0xe3be));
+    cafButton->setIcon(icon(0xe3e9)); // auto_fix
     compressButton->setIcon(icon(0xe94d));
     rotateRightButton->setIcon(icon(0xe41a));
     thumbnailBarButton->setIcon(icon(0xe413));
@@ -1983,7 +2241,8 @@ void MainWindow::updateImageToolbar()
     trashButton->setEnabled(hasImage);
     printButton->setEnabled(hasImage);
     pdfButton->setEnabled(hasImage);
-    cropButton->setEnabled(canEdit);
+    cropButton->setEnabled(canEdit && !cafRunning);
+    cafButton->setEnabled(canEdit && !cafRunning);
     compressButton->setEnabled(true);
     compressButton->setPopupMode(canEdit ? QToolButton::MenuButtonPopup : QToolButton::InstantPopup);
     if (compressCurrentAction)
@@ -1992,6 +2251,13 @@ void MainWindow::updateImageToolbar()
     cropButton->setChecked(graphicsView->isCropping());
     cropButton->setToolTip(graphicsView->isCropping() ? tr("Drag to select the area to keep.")
                                                       : tr("Crop"));
+    cafButton->setChecked(graphicsView->isFillSelecting());
+    if (cafRunning)
+        cafButton->setToolTip(tr("正在智能填充…"));
+    else if (graphicsView->isFillSelecting())
+        cafButton->setToolTip(tr("拖出要去除/填充的矩形区域，右键或 Esc 取消。"));
+    else
+        cafButton->setToolTip(tr("智能填充：拖出矩形选区，用周围纹理填补。"));
     const bool modified = graphicsView->isImageModified();
     restoreButton->setVisible(modified);
     saveButton->setVisible(modified);

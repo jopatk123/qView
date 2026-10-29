@@ -818,6 +818,16 @@ void QVImageCore::cropImage(const QRect &rect)
     replacePixmap(loadedPixmap.toImage().copy(bounded));
 }
 
+void QVImageCore::applyContentAwareResult(const QImage &image)
+{
+    if (image.isNull() || !canEditStill())
+        return;
+
+    pendingEncoded.clear();
+    replacePixmap(image);
+}
+
+
 QVImageCore::CompressionOutput QVImageCore::encodeCompressed(const QImage &source,
                                                               const QSize &targetSize,
                                                               const QByteArray &format, int quality,

@@ -3,6 +3,9 @@
 #include "qvwin32functions.h"
 
 #include <QCommandLineParser>
+#include <QTimer>
+#include <QCoreApplication>
+#include <cstdlib>
 
 int main(int argc, char *argv[])
 {
@@ -32,6 +35,27 @@ int main(int argc, char *argv[])
 #endif
 
     auto *window = QVApplication::newWindow();
+
+    if (qEnvironmentVariableIsSet("QV_CAF_SELFTEST")) {
+        const QString path = parser.positionalArguments().isEmpty()
+                ? QString::fromUtf8(qgetenv("QV_CAF_SELFTEST"))
+                : parser.positionalArguments().constFirst();
+        if (path.isEmpty() || path == QLatin1String("1")) {
+            qWarning("QV_CAF_SELFTEST set but no image path (pass file arg or QV_CAF_SELFTEST=/path.png)");
+            return 2;
+        }
+        window->show();
+        auto *exitCode = new int(1);
+        QTimer::singleShot(300, window, [window, path, exitCode]() {
+            *exitCode = window->runCafSelfTest(path);
+            QCoreApplication::exit(*exitCode);
+        });
+        const int rc = QApplication::exec();
+        const int out = *exitCode;
+        delete exitCode;
+        return out != 0 ? out : rc;
+    }
+
     if (!parser.positionalArguments().isEmpty())
         QVApplication::openFile(window, parser.positionalArguments().constFirst(), true);
 

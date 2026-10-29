@@ -114,6 +114,8 @@ public:
     void mirrorImage();
     void flipImage();
     void cropImage(const QRect &rect);
+    // Apply a full-size image from content-aware fill (same edit/undo path as crop).
+    void applyContentAwareResult(const QImage &image);
     struct CompressionOutput
     {
         QImage image;

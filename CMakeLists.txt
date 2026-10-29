@@ -28,14 +28,14 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # Find required Qt components
-find_package(Qt6 QUIET COMPONENTS Core Gui Network Widgets Svg PrintSupport)
+find_package(Qt6 QUIET COMPONENTS Core Gui Network Widgets Svg PrintSupport Concurrent)
 if(Qt6_FOUND)
     set(QT_VERSION_MAJOR 6)
     set(QT_VERSION ${Qt6_VERSION})
     # Find optional tools
     find_package(Qt6 QUIET COMPONENTS LinguistTools)
 else()
-    set(QT5_FIND_COMPONENTS Core Gui Network Widgets Svg PrintSupport)
+    set(QT5_FIND_COMPONENTS Core Gui Network Widgets Svg PrintSupport Concurrent)
     if(UNIX AND NOT APPLE)
         list(APPEND QT5_FIND_COMPONENTS X11Extras)
     endif()
@@ -68,6 +68,7 @@ set(PROJECT_SOURCES
     src/actionmanager.cpp
     src/settingsmanager.cpp
     src/shortcutmanager.cpp
+    src/qvcaf/qvcaf_qt.cpp
 )
 
 # Header files
@@ -91,6 +92,7 @@ set(PROJECT_HEADERS
     src/actionmanager.h
     src/settingsmanager.h
     src/shortcutmanager.h
+    src/qvcaf/qvcaf_qt.h
 )
 
 # UI form files
@@ -149,7 +151,7 @@ if(WIN32)
 endif()
 add_executable(${PROJECT_NAME} ${EXECUTABLE_TYPE} ${PROJECT_SOURCES} ${PROJECT_HEADERS} ${PROJECT_FORMS} ${PROJECT_RESOURCES})
 
-target_link_libraries(${PROJECT_NAME} PRIVATE Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Svg Qt${QT_VERSION_MAJOR}::PrintSupport)
+target_link_libraries(${PROJECT_NAME} PRIVATE Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Svg Qt${QT_VERSION_MAJOR}::PrintSupport Qt${QT_VERSION_MAJOR}::Concurrent)
 
 find_package(JPEG QUIET)
 if(JPEG_FOUND)
@@ -224,7 +226,9 @@ elseif(UNIX AND NOT APPLE)
     if(NOT NO_X11)
         find_package(X11 REQUIRED)
         set(PLATFORM_SPECIFIC_LIBS ${X11_LIBRARIES})
-        if(NOT Qt6_FOUND)
+        # Use QT_VERSION_MAJOR: a later optional find_package(Qt6 LinguistTools)
+        # can clear Qt6_FOUND even when the app is already on Qt 6.
+        if(QT_VERSION_MAJOR LESS 6)
             list(APPEND PLATFORM_SPECIFIC_LIBS Qt5::X11Extras)
         endif()
         target_link_libraries(${PROJECT_NAME} PRIVATE ${PLATFORM_SPECIFIC_LIBS})
@@ -279,3 +283,10 @@ install(FILES dist/linux/com.interversehq.qView.appdata.xml DESTINATION ${CMAKE_
 if(BUILD_TESTS)
     add_subdirectory(tests)
 endif()
+
+# Content-aware fill (PatchMatch) — always link the static lib into the app.
+# Optional CLI via BUILD_CAF_TOOLS (or standalone: cmake -S src/qvcaf ...).
+option(BUILD_CAF_TOOLS "Build qvcaf CLI (qvcaf-cli)" OFF)
+add_subdirectory(src/qvcaf)
+target_link_libraries(${PROJECT_NAME} PRIVATE qvcaf)
+target_include_directories(${PROJECT_NAME} PRIVATE src/qvcaf)

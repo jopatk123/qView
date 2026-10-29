@@ -51,3 +51,7 @@ build/*
 
 *.qm
 .qm
+
+# CAF Phase 1 local build
+build-caf/
+

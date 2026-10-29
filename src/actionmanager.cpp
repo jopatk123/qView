@@ -255,6 +255,8 @@ QMenu *ActionManager::buildViewMenu(bool addIcon, QWidget *parent)
     addCloneOfAction(viewMenu, "mirror");
     addCloneOfAction(viewMenu, "flip");
     viewMenu->addSeparator();
+    addCloneOfAction(viewMenu, "contentawarefill");
+    viewMenu->addSeparator();
     addCloneOfAction(viewMenu, "fullscreen");
     addCloneOfAction(viewMenu, "togglethumbnailbar");
     addCloneOfAction(viewMenu, "togglefileinfopanel");
@@ -602,6 +604,8 @@ void ActionManager::actionTriggered(QAction *triggeredAction, MainWindow *releva
         relevantWindow->mirror();
     } else if (key == "flip") {
         relevantWindow->flip();
+    } else if (key == "contentawarefill") {
+        relevantWindow->contentAwareFill();
     } else if (key == "fullscreen") {
         relevantWindow->toggleFullScreen();
     } else if (key == "togglethumbnailbar") {
@@ -746,6 +750,12 @@ void ActionManager::initializeActionLibrary()
     auto *flipAction = new QAction(QIcon::fromTheme("object-flip-vertical"), tr("&Flip"));
     flipAction->setData({ "disable" });
     actionLibrary.insert("flip", flipAction);
+
+    // Chinese primary label for this fork; English translators can override.
+    auto *contentAwareFillAction = new QAction(
+            QIcon::fromTheme("edit-select", QIcon::fromTheme("insert-image")), tr("智能填充"));
+    contentAwareFillAction->setData({ "disable" });
+    actionLibrary.insert("contentawarefill", contentAwareFillAction);
 
     auto *toggleTitlebarAction = new QAction(tr("Hide Title&bar"));
     toggleTitlebarAction->setData({ "windowdisable" });
