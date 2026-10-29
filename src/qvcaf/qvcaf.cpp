@@ -37,9 +37,19 @@ struct ValidField {
     int radius = 0;
 };
 
-// Ring context for patchDistance weights (single-threaded Phase 1).
+// Ring / structure / soft-match context (single-threaded).
 const uint16_t *g_ringDist = nullptr;
 int g_ringTrusted = 0;
+const float *g_softHole = nullptr;   // 0=known, ~0 near hole edge, 1=deep hole
+const float *g_dstGx = nullptr;
+const float *g_dstGy = nullptr;
+const float *g_dstMag = nullptr;
+const float *g_srcGx = nullptr;
+const float *g_srcGy = nullptr;
+const float *g_srcMag = nullptr;
+float g_structureWeight = 0.f;
+float g_softMatchBoost = 0.f;
+bool g_structureGuide = false;
 
 inline uint8_t clampByte(float value)
 {
@@ -146,6 +156,92 @@ std::vector<uint16_t> distanceToKnown(const uint8_t *hole, int w, int h)
         }
     }
     return dist;
+}
+
+
+std::vector<float> buildSoftHole(const uint8_t *hole, int w, int h, int softWidth)
+{
+    const int n = w * h;
+    std::vector<float> soft(static_cast<size_t>(n), 0.f);
+    if (softWidth <= 0) {
+        for (int i = 0; i < n; ++i)
+            soft[i] = hole[i] ? 1.f : 0.f;
+        return soft;
+    }
+    std::vector<uint16_t> dist = distanceToKnown(hole, w, h);
+    const float inv = 1.f / static_cast<float>(softWidth);
+    for (int i = 0; i < n; ++i) {
+        if (!hole[i]) {
+            soft[i] = 0.f;
+            continue;
+        }
+        // 0 at the known seam, 1 once deeper than softWidth.
+        soft[i] = smoothstep01((static_cast<float>(dist[i]) - 0.5f) * inv);
+    }
+    return soft;
+}
+
+inline float luminanceAt(const uint8_t *r, const uint8_t *g, const uint8_t *b, int i)
+{
+    return 0.299f * r[i] + 0.587f * g[i] + 0.114f * b[i];
+}
+
+inline float luminanceRgb(const uint8_t *rgb, int i)
+{
+    const int c = i * 3;
+    return 0.299f * rgb[c] + 0.587f * rgb[c + 1] + 0.114f * rgb[c + 2];
+}
+
+void computeGradientsPlanes(const uint8_t *r, const uint8_t *g, const uint8_t *b,
+                            int w, int h,
+                            std::vector<float> &gx, std::vector<float> &gy, std::vector<float> &mag)
+{
+    const int n = w * h;
+    gx.assign(static_cast<size_t>(n), 0.f);
+    gy.assign(static_cast<size_t>(n), 0.f);
+    mag.assign(static_cast<size_t>(n), 0.f);
+    if (w < 3 || h < 3)
+        return;
+    for (int y = 1; y < h - 1; ++y) {
+        for (int x = 1; x < w - 1; ++x) {
+            const int i = y * w + x;
+            // Central differences on luminance (stable, ~[-255,255]).
+            const float lxm = luminanceAt(r, g, b, i - 1);
+            const float lxp = luminanceAt(r, g, b, i + 1);
+            const float lym = luminanceAt(r, g, b, i - w);
+            const float lyp = luminanceAt(r, g, b, i + w);
+            const float dx = 0.5f * (lxp - lxm);
+            const float dy = 0.5f * (lyp - lym);
+            gx[i] = dx;
+            gy[i] = dy;
+            mag[i] = std::sqrt(dx * dx + dy * dy);
+        }
+    }
+}
+
+void computeGradientsRgb(const uint8_t *rgb, int w, int h,
+                         std::vector<float> &gx, std::vector<float> &gy, std::vector<float> &mag)
+{
+    const int n = w * h;
+    gx.assign(static_cast<size_t>(n), 0.f);
+    gy.assign(static_cast<size_t>(n), 0.f);
+    mag.assign(static_cast<size_t>(n), 0.f);
+    if (w < 3 || h < 3)
+        return;
+    for (int y = 1; y < h - 1; ++y) {
+        for (int x = 1; x < w - 1; ++x) {
+            const int i = y * w + x;
+            const float lxm = luminanceRgb(rgb, i - 1);
+            const float lxp = luminanceRgb(rgb, i + 1);
+            const float lym = luminanceRgb(rgb, i - w);
+            const float lyp = luminanceRgb(rgb, i + w);
+            const float dx = 0.5f * (lxp - lxm);
+            const float dy = 0.5f * (lyp - lym);
+            gx[i] = dx;
+            gy[i] = dy;
+            mag[i] = std::sqrt(dx * dx + dy * dy);
+        }
+    }
 }
 
 Level buildLevel(const uint8_t *rgba, const uint8_t *mask, int w, int h)
@@ -586,6 +682,8 @@ float patchDistance(const uint8_t *dstR, const uint8_t *dstG, const uint8_t *dst
     const int size = r * 2 + 1;
     int ty = y - r;
     int sy0 = sy - r;
+    const bool useStruct = g_structureGuide && g_structureWeight > 0.f
+        && g_dstGx && g_dstGy && g_srcGx && g_srcGy;
     for (int row = 0; row < size; ++row) {
         if (ty < 0 || sy0 < 0 || ty >= h || sy0 >= h) {
             ++ty;
@@ -593,13 +691,15 @@ float patchDistance(const uint8_t *dstR, const uint8_t *dstG, const uint8_t *dst
             continue;
         }
         int di = ty * w + (x - r);
-        int si = (sy0 * w + (sx - r)) * 3;
+        int siPix = sy0 * w + (sx - r);
+        int si = siPix * 3;
         const int rowEnd = di + size;
         const int rowStartLimit = ty * w;
         const int rowEndLimit = rowStartLimit + w;
         if (di < rowStartLimit) {
             const int skip = rowStartLimit - di;
             di += skip;
+            siPix += skip;
             si += skip * 3;
         }
         const int maxDi = rowEnd < rowEndLimit ? rowEnd : rowEndLimit;
@@ -608,14 +708,75 @@ float patchDistance(const uint8_t *dstR, const uint8_t *dstG, const uint8_t *dst
                 const int dr = static_cast<int>(dstR[di]) - static_cast<int>(srcRgb[si]);
                 const int dg = static_cast<int>(dstG[di]) - static_cast<int>(srcRgb[si + 1]);
                 const int db = static_cast<int>(dstB[di]) - static_cast<int>(srcRgb[si + 2]);
-                const float weight = !hole[di] ? 4.f
-                    : (g_ringDist && g_ringDist[di] < static_cast<uint16_t>(g_ringTrusted) ? 3.f : 1.f);
-                sum += (dr * dr + dg * dg + db * db) * weight;
+                float colorTerm = static_cast<float>(dr * dr + dg * dg + db * db);
+
+                // Soft α / ring trust into match weight.
+                float weight;
+                if (!hole[di]) {
+                    weight = 4.f;
+                    if (g_softHole && g_softMatchBoost > 0.f) {
+                        // Known pixels near the seam already have softHole==0; boost
+                        // is applied via softMatchBoost on the complementary hole soft.
+                        // Extra: known always high; near-edge hole soft lifts below.
+                        weight += g_softMatchBoost;
+                    }
+                } else {
+                    const bool trusted = g_ringDist
+                        && g_ringDist[di] < static_cast<uint16_t>(g_ringTrusted);
+                    weight = trusted ? 3.f : 1.f;
+                    if (g_softHole) {
+                        // Near seam (soft→0): treat more like known so structure continues.
+                        const float soft = g_softHole[di];
+                        const float edgeLift = (1.f - soft) * (1.f - soft);
+                        weight += (trusted ? 2.2f : 3.0f) * edgeLift * (1.f + 0.35f * g_softMatchBoost);
+                    }
+                }
+
+                float structTerm = 0.f;
+                if (useStruct) {
+                    // Structure only from reliable pixels: known, or soft-near-edge /
+                    // already-trusted filled rings. Deep untrusted hole estimates stay out.
+                    const bool isKnown = !hole[di];
+                    const bool trusted = hole[di] && g_ringDist
+                        && g_ringDist[di] < static_cast<uint16_t>(g_ringTrusted);
+                    const float softNear = (g_softHole && hole[di]) ? (1.f - g_softHole[di]) : 0.f;
+                    const bool usePixStruct = isKnown || trusted || softNear > 0.35f;
+                    if (usePixStruct) {
+                        float sScale = g_structureWeight;
+                        if (isKnown)
+                            sScale *= 1.15f;
+                        else if (trusted)
+                            sScale *= 0.70f + 0.45f * softNear;
+                        else
+                            sScale *= 0.55f * softNear;
+                        const float dgx = g_dstGx[di] - g_srcGx[siPix];
+                        const float dgy = g_dstGy[di] - g_srcGy[siPix];
+                        structTerm = dgx * dgx + dgy * dgy;
+                        if (g_dstMag && g_srcMag) {
+                            const float md = g_dstMag[di];
+                            const float ms = g_srcMag[siPix];
+                            if (md > 6.f && ms > 6.f) {
+                                const float inv = 1.f / (md * ms);
+                                const float aligned = std::fabs((g_dstGx[di] * g_srcGx[siPix]
+                                                                 + g_dstGy[di] * g_srcGy[siPix]) * inv);
+                                const float mis = 1.f - aligned;
+                                structTerm += mis * mis * (md * ms) * 1.35f;
+                            }
+                            // Emphasize strong edges in the match weight.
+                            const float edge = isKnown ? md : 0.5f * (md + ms);
+                            weight *= 1.f + std::min(2.6f, edge * (1.f / 32.f));
+                        }
+                        colorTerm += sScale * structTerm;
+                    }
+                }
+
+                sum += colorTerm * weight;
                 weightSum += weight;
                 if (weightSum > 0.f && sum >= best * weightSum)
                     return sum / weightSum;
             }
             ++di;
+            ++siPix;
             si += 3;
         }
         ++ty;
@@ -739,7 +900,13 @@ void vote(uint8_t *dstR, uint8_t *dstG, uint8_t *dstB, uint8_t *dstA,
                 const int ti = ty * w + tx;
                 if (!hole[ti])
                     continue;
-                const float spatial = 1.f / (1.f + ox * ox + oy * oy);
+                float spatial = 1.f / (1.f + ox * ox + oy * oy);
+                // Soft α into vote: near the seam, damp erratic contributions slightly
+                // so known-neighbor pull (below) can dominate the perimeter.
+                if (g_softHole) {
+                    const float soft = g_softHole[ti];
+                    spatial *= 0.50f + 0.50f * soft;
+                }
                 const float weight = match * spatial;
                 const int qi = qy * w + qx;
                 const int qc = qi * 3;
@@ -757,10 +924,53 @@ void vote(uint8_t *dstR, uint8_t *dstG, uint8_t *dstB, uint8_t *dstA,
         if (weight <= 1e-6f)
             continue;
         const float inv = 1.f / weight;
-        dstR[i] = clampByte(accR[i] * inv);
-        dstG[i] = clampByte(accG[i] * inv);
-        dstB[i] = clampByte(accB[i] * inv);
-        dstA[i] = clampByte(accA[i] * inv);
+        float vr = accR[i] * inv;
+        float vg = accG[i] * inv;
+        float vb = accB[i] * inv;
+        float va = accA[i] * inv;
+
+        // Soft edge into vote write-back: light pull toward known neighbors near the
+        // seam (keeps texture from PatchMatch; strong mean-blend washes structure).
+        if (g_softHole && g_softHole[i] < 0.85f) {
+            const int y = i / w;
+            const int x = i - y * w;
+            float samples = 0.f, sr = 0, sg = 0, sb = 0, sa = 0;
+            for (int oy = -2; oy <= 2; ++oy) {
+                const int ny = y + oy;
+                if (ny < 0 || ny >= h)
+                    continue;
+                for (int ox = -2; ox <= 2; ++ox) {
+                    const int nx = x + ox;
+                    if (nx < 0 || nx >= w)
+                        continue;
+                    const int ni = ny * w + nx;
+                    if (hole[ni])
+                        continue;
+                    const float spat = 1.f / (1.f + 0.3f * (ox * ox + oy * oy));
+                    const int c = ni * 3;
+                    sr += srcRgb[c] * spat;
+                    sg += srcRgb[c + 1] * spat;
+                    sb += srcRgb[c + 2] * spat;
+                    sa += srcA[ni] * spat;
+                    samples += spat;
+                }
+            }
+            if (samples > 1e-6f) {
+                const float invS = 1.f / samples;
+                const float edge = 1.f - smoothstep01(g_softHole[i]);
+                const float knownPull = 0.38f * edge * edge;
+                const float keep = 1.f - knownPull;
+                vr = vr * keep + sr * invS * knownPull;
+                vg = vg * keep + sg * invS * knownPull;
+                vb = vb * keep + sb * invS * knownPull;
+                va = va * keep + sa * invS * knownPull;
+            }
+        }
+
+        dstR[i] = clampByte(vr);
+        dstG[i] = clampByte(vg);
+        dstB[i] = clampByte(vb);
+        dstA[i] = clampByte(va);
     }
 }
 
@@ -1161,6 +1371,12 @@ FillError fillFull(const uint8_t *rgba, const uint8_t *mask, int width, int heig
 {
     g_ringDist = nullptr;
     g_ringTrusted = 0;
+    g_softHole = nullptr;
+    g_dstGx = g_dstGy = g_dstMag = nullptr;
+    g_srcGx = g_srcGy = g_srcMag = nullptr;
+    g_structureWeight = 0.f;
+    g_softMatchBoost = 0.f;
+    g_structureGuide = false;
     const Quality quality = resolveQuality(holeCount, options);
     Level finest = buildLevel(rgba, mask, width, height);
     if (finest.holeCount == 0)
@@ -1221,6 +1437,32 @@ FillError fillFull(const uint8_t *rgba, const uint8_t *mask, int width, int heig
             ? std::max(w, h)
             : std::min(std::max(w, h), isFinest ? quality.searchCap : quality.searchCap * 2);
         std::vector<uint16_t> holeDist = distanceToKnown(level.hole.data(), w, h);
+
+        // Soft α from binary hole (rect or free): enters match weights + vote.
+        const int softW = options.softMatchWidth < 0 ? 6 : options.softMatchWidth;
+        std::vector<float> softHole;
+        if (softW > 0) {
+            softHole = buildSoftHole(level.hole.data(), w, h, softW);
+            g_softHole = softHole.data();
+            g_softMatchBoost = options.softMatchBoost > 0.f ? options.softMatchBoost : 1.f;
+        } else {
+            g_softHole = nullptr;
+            g_softMatchBoost = 0.f;
+        }
+
+        // Source gradients (fixed). Destination gradients refresh each ring after vote.
+        std::vector<float> srcGx, srcGy, srcMag, dstGx, dstGy, dstMag;
+        g_structureGuide = options.structureGuide && options.structureWeight > 0.f;
+        g_structureWeight = g_structureGuide ? options.structureWeight : 0.f;
+        if (g_structureGuide) {
+            computeGradientsRgb(level.rgb.data(), w, h, srcGx, srcGy, srcMag);
+            computeGradientsPlanes(dstR.data(), dstG.data(), dstB.data(), w, h, dstGx, dstGy, dstMag);
+            g_srcGx = srcGx.data(); g_srcGy = srcGy.data(); g_srcMag = srcMag.data();
+            g_dstGx = dstGx.data(); g_dstGy = dstGy.data(); g_dstMag = dstMag.data();
+        } else {
+            g_srcGx = g_srcGy = g_srcMag = nullptr;
+            g_dstGx = g_dstGy = g_dstMag = nullptr;
+        }
         int maxDist = 1;
         for (int k = 0; k < level.holeCount; ++k) {
             const int distance = holeDist[level.holeList[k]];
@@ -1261,6 +1503,11 @@ FillError fillFull(const uint8_t *rgba, const uint8_t *mask, int width, int heig
                  level.rgb.data(), level.alpha.data(), level.hole.data(),
                  nnx.data(), nny.data(), score.data(),
                  active.data(), activeCount, w, h, r);
+            if (g_structureGuide) {
+                computeGradientsPlanes(dstR.data(), dstG.data(), dstB.data(), w, h,
+                                       dstGx, dstGy, dstMag);
+                g_dstGx = dstGx.data(); g_dstGy = dstGy.data(); g_dstMag = dstMag.data();
+            }
             if ((ring & 3) == 0 || ring == ringCount - 1) {
                 const float doneLevels = (levelCount - 1 - li) + (ring + 1) / static_cast<float>(ringCount);
                 if (options.onProgress)
@@ -1269,6 +1516,12 @@ FillError fillFull(const uint8_t *rgba, const uint8_t *mask, int width, int heig
         }
         g_ringDist = nullptr;
         g_ringTrusted = 0;
+        g_softHole = nullptr;
+        g_dstGx = g_dstGy = g_dstMag = nullptr;
+        g_srcGx = g_srcGy = g_srcMag = nullptr;
+        g_structureGuide = false;
+        g_structureWeight = 0.f;
+        g_softMatchBoost = 0.f;
 
         harmonizePlanes(dstR.data(), dstG.data(), dstB.data(), dstA.data(),
                         level.rgb.data(), level.alpha.data(), level.hole.data(),
