@@ -27,7 +27,7 @@ struct FillOptions {
     int pmIters = -1;
     int searchCap = -1;
 
-    // Edge fusion (quality-first defaults).
+    // Edge fusion (quality-first defaults) — post PatchMatch.
     // Width of known-neighbor feather band inside the hole (pixels).
     int featherWidth = 4;
     // Extra soft-edge band: pull hole perimeter toward known-neighbor reconstruction
@@ -37,6 +37,17 @@ struct FillOptions {
     bool colorMatch = true;
     // Multiplier on Jacobi harmonize iterations (1.0 = strengthened baseline).
     float harmonizeStrength = 1.25f;
+
+    // --- Matching-stage quality (structure + soft edge into energy/vote) ---
+    // Add luminance-gradient / edge-orientation terms to patch distance.
+    bool structureGuide = true;
+    // Weight of gradient SSD relative to RGB SSD (same ~byte^2 units).
+    float structureWeight = 3.5f;
+    // Soft α band from the known boundary into the hole for match weights + vote.
+    // 0 disables soft-match (binary hole weights only).
+    int softMatchWidth = 6;
+    // Extra boost for known pixels near the hole edge in patch distance.
+    float softMatchBoost = 1.35f;
 };
 
 // Fill mask pixels (nonzero = hole) from surrounding texture.
