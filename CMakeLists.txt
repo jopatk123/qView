@@ -279,3 +279,9 @@ install(FILES dist/linux/com.interversehq.qView.appdata.xml DESTINATION ${CMAKE_
 if(BUILD_TESTS)
     add_subdirectory(tests)
 endif()
+
+# Optional content-aware fill (PatchMatch) library + CLI — no Qt required.
+option(BUILD_CAF_TOOLS "Build qvcaf PatchMatch library and CLI" OFF)
+if(BUILD_CAF_TOOLS)
+    add_subdirectory(src/qvcaf)
+endif()
