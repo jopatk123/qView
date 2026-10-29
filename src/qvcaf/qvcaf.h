@@ -21,6 +21,22 @@ enum class FillError {
 struct FillOptions {
     // Optional progress callback: 0..100
     std::function<void(int)> onProgress;
+
+    // Quality overrides (-1 = choose from hole area; defaults bias toward quality).
+    int radius = -1;
+    int pmIters = -1;
+    int searchCap = -1;
+
+    // Edge fusion (quality-first defaults).
+    // Width of known-neighbor feather band inside the hole (pixels).
+    int featherWidth = 4;
+    // Extra soft-edge band: pull hole perimeter toward known-neighbor reconstruction
+    // (smooth falloff; does not reintroduce original hole content).
+    int softEdgeWidth = 3;
+    // Match hole-boundary mean/gain to adjacent known pixels (with distance falloff).
+    bool colorMatch = true;
+    // Multiplier on Jacobi harmonize iterations (1.0 = strengthened baseline).
+    float harmonizeStrength = 1.25f;
 };
 
 // Fill mask pixels (nonzero = hole) from surrounding texture.

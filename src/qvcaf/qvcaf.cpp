@@ -82,13 +82,35 @@ int countHoles(const uint8_t *mask, int n)
 
 Quality qualityFor(int holeCount)
 {
+    // Quality-first defaults (slower than the open-ps MVP table).
     if (holeCount < 8000)
-        return {4, 3, 72};
+        return {5, 5, 96};
     if (holeCount < 40000)
-        return {4, 3, 64};
+        return {5, 4, 80};
     if (holeCount < 120000)
-        return {3, 2, 40};
-    return {2, 2, 28};
+        return {4, 3, 56};
+    return {3, 3, 40};
+}
+
+Quality resolveQuality(int holeCount, const FillOptions &options)
+{
+    Quality q = qualityFor(holeCount);
+    if (options.radius > 0)
+        q.radius = options.radius;
+    if (options.pmIters > 0)
+        q.pmIters = options.pmIters;
+    if (options.searchCap > 0)
+        q.searchCap = options.searchCap;
+    return q;
+}
+
+inline float smoothstep01(float t)
+{
+    if (t <= 0.f)
+        return 0.f;
+    if (t >= 1.f)
+        return 1.f;
+    return t * t * (3.f - 2.f * t);
 }
 
 std::vector<uint16_t> distanceToKnown(const uint8_t *hole, int w, int h)
@@ -742,8 +764,7 @@ void vote(uint8_t *dstR, uint8_t *dstG, uint8_t *dstB, uint8_t *dstA,
     }
 }
 
-void featherBoundary(uint8_t *dstR, uint8_t *dstG, uint8_t *dstB, uint8_t *dstA,
-                     const uint8_t *srcRgb, const uint8_t *srcA, const uint8_t *hole, int w, int h)
+std::vector<uint16_t> distanceToKnownCapped(const uint8_t *hole, int w, int h, int cap)
 {
     const int n = w * h;
     std::vector<uint16_t> dist(n);
@@ -762,6 +783,7 @@ void featherBoundary(uint8_t *dstR, uint8_t *dstG, uint8_t *dstB, uint8_t *dstA,
             dist[i] = m;
         }
     }
+    const uint16_t maxCap = static_cast<uint16_t>(std::max(1, cap));
     for (int y = h - 1; y >= 0; --y) {
         for (int x = w - 1; x >= 0; --x) {
             const int i = y * w + x;
@@ -772,38 +794,58 @@ void featherBoundary(uint8_t *dstR, uint8_t *dstG, uint8_t *dstB, uint8_t *dstA,
                 m = dist[i + 1] + 1;
             if (y + 1 < h && dist[i + w] + 1 < m)
                 m = dist[i + w] + 1;
-            dist[i] = m > 8 ? 8 : m;
+            dist[i] = m > maxCap ? maxCap : m;
         }
     }
-    for (int band = 1; band <= 2; ++band) {
-        const float blend = band == 1 ? 0.42f : 0.18f;
+    return dist;
+}
+
+void featherBoundary(uint8_t *dstR, uint8_t *dstG, uint8_t *dstB, uint8_t *dstA,
+                     const uint8_t *srcRgb, const uint8_t *srcA, const uint8_t *hole,
+                     int w, int h, int featherWidth)
+{
+    const int width = std::max(1, std::min(featherWidth, 12));
+    std::vector<uint16_t> dist = distanceToKnownCapped(hole, w, h, width + 1);
+    // Outer bands first so inner bands can pull from already-softened neighbors.
+    for (int band = width; band >= 1; --band) {
+        // Smooth falloff: stronger near known edge, weaker deeper inside.
+        const float t = static_cast<float>(band) / static_cast<float>(width + 1);
+        const float blend = 0.62f * (1.f - t) * (1.f - t);
+        if (blend < 0.02f)
+            continue;
         for (int y = 0; y < h; ++y) {
             for (int x = 0; x < w; ++x) {
                 const int i = y * w + x;
                 if (dist[i] != band)
                     continue;
-                int samples = 0, sr = 0, sg = 0, sb = 0, sa = 0;
-                for (int oy = -1; oy <= 1; ++oy) {
+                float samples = 0.f, sr = 0, sg = 0, sb = 0, sa = 0;
+                for (int oy = -2; oy <= 2; ++oy) {
                     const int ny = y + oy;
                     if (ny < 0 || ny >= h)
                         continue;
-                    for (int ox = -1; ox <= 1; ++ox) {
+                    for (int ox = -2; ox <= 2; ++ox) {
+                        if (ox == 0 && oy == 0)
+                            continue;
                         const int nx = x + ox;
-                        if (nx < 0 || nx >= w || (ox == 0 && oy == 0))
+                        if (nx < 0 || nx >= w)
                             continue;
                         const int ni = ny * w + nx;
                         if (dist[ni] >= band)
                             continue;
+                        // Prefer closer / known neighbors.
+                        const float spatial = 1.f / (1.f + 0.35f * (ox * ox + oy * oy));
+                        const float knownBoost = dist[ni] == 0 ? 1.35f : 1.f;
+                        const float wgt = spatial * knownBoost;
                         const int c = ni * 3;
-                        const int pr = dist[ni] == 0 ? srcRgb[c] : dstR[ni];
-                        const int pg = dist[ni] == 0 ? srcRgb[c + 1] : dstG[ni];
-                        const int pb = dist[ni] == 0 ? srcRgb[c + 2] : dstB[ni];
-                        const int pa = dist[ni] == 0 ? srcA[ni] : dstA[ni];
-                        sr += pr; sg += pg; sb += pb; sa += pa;
-                        ++samples;
+                        const float pr = dist[ni] == 0 ? srcRgb[c] : dstR[ni];
+                        const float pg = dist[ni] == 0 ? srcRgb[c + 1] : dstG[ni];
+                        const float pb = dist[ni] == 0 ? srcRgb[c + 2] : dstB[ni];
+                        const float pa = dist[ni] == 0 ? srcA[ni] : dstA[ni];
+                        sr += pr * wgt; sg += pg * wgt; sb += pb * wgt; sa += pa * wgt;
+                        samples += wgt;
                     }
                 }
-                if (samples == 0)
+                if (samples <= 1e-6f)
                     continue;
                 const float inv = 1.f / samples;
                 dstR[i] = clampByte(dstR[i] * (1.f - blend) + sr * inv * blend);
@@ -815,9 +857,150 @@ void featherBoundary(uint8_t *dstR, uint8_t *dstG, uint8_t *dstB, uint8_t *dstA,
     }
 }
 
+// Pull hole-boundary colors toward adjacent known mean/gain (distance falloff).
+void matchBoundaryColors(uint8_t *dstR, uint8_t *dstG, uint8_t *dstB, uint8_t *dstA,
+                         const uint8_t *srcRgb, const uint8_t *srcA, const uint8_t *hole,
+                         const int32_t *holeList, int holeCount, int w, int h)
+{
+    if (holeCount <= 0)
+        return;
+    double knownR = 0, knownG = 0, knownB = 0, knownA = 0;
+    double holeR = 0, holeG = 0, holeB = 0, holeA = 0;
+    int knownN = 0, holeN = 0;
+    for (int k = 0; k < holeCount; ++k) {
+        const int i = holeList[k];
+        const int y = i / w;
+        const int x = i - y * w;
+        bool touchesKnown = false;
+        for (int oy = -1; oy <= 1 && !touchesKnown; ++oy) {
+            for (int ox = -1; ox <= 1; ++ox) {
+                if (ox == 0 && oy == 0)
+                    continue;
+                const int nx = x + ox, ny = y + oy;
+                if (nx < 0 || ny < 0 || nx >= w || ny >= h)
+                    continue;
+                const int ni = ny * w + nx;
+                if (hole[ni])
+                    continue;
+                touchesKnown = true;
+                const int c = ni * 3;
+                knownR += srcRgb[c];
+                knownG += srcRgb[c + 1];
+                knownB += srcRgb[c + 2];
+                knownA += srcA[ni];
+                ++knownN;
+            }
+        }
+        if (touchesKnown) {
+            holeR += dstR[i];
+            holeG += dstG[i];
+            holeB += dstB[i];
+            holeA += dstA[i];
+            ++holeN;
+        }
+    }
+    if (knownN < 4 || holeN < 4)
+        return;
+    knownR /= knownN; knownG /= knownN; knownB /= knownN; knownA /= knownN;
+    holeR /= holeN; holeG /= holeN; holeB /= holeN; holeA /= holeN;
+
+    auto gainOf = [](double known, double hole) {
+        if (hole < 1.0)
+            return 1.0;
+        const double g = known / hole;
+        if (g < 0.72)
+            return 0.72;
+        if (g > 1.38)
+            return 1.38;
+        return g;
+    };
+    const double gR = gainOf(knownR, holeR);
+    const double gG = gainOf(knownG, holeG);
+    const double gB = gainOf(knownB, holeB);
+    const double gA = gainOf(knownA, holeA);
+    const double bR = knownR - gR * holeR;
+    const double bG = knownG - gG * holeG;
+    const double bB = knownB - gB * holeB;
+    const double bA = knownA - gA * holeA;
+
+    std::vector<uint16_t> dist = distanceToKnownCapped(hole, w, h, 24);
+    const float sigma = 6.f;
+    for (int k = 0; k < holeCount; ++k) {
+        const int i = holeList[k];
+        const float d = static_cast<float>(dist[i]);
+        // Strong near the seam, fades deeper into the hole.
+        const float strength = std::exp(-d / sigma);
+        if (strength < 0.02f)
+            continue;
+        auto mix = [&](uint8_t cur, double gain, double bias) {
+            const double matched = gain * cur + bias;
+            return clampByte(static_cast<float>(cur * (1.0 - strength) + matched * strength));
+        };
+        dstR[i] = mix(dstR[i], gR, bR);
+        dstG[i] = mix(dstG[i], gG, bG);
+        dstB[i] = mix(dstB[i], gB, bB);
+        dstA[i] = mix(dstA[i], gA, bA);
+    }
+}
+
+// Soft edge pass: near the hole perimeter, pull toward a local reconstruction from
+// known neighbors only (never re-blend the original hole content — that ghosts objects).
+void softEdgeBlend(uint8_t *dstR, uint8_t *dstG, uint8_t *dstB, uint8_t *dstA,
+                   const uint8_t *srcRgb, const uint8_t *srcA, const uint8_t *hole,
+                   const int32_t *holeList, int holeCount, int w, int h, int softWidth)
+{
+    const int width = std::max(0, std::min(softWidth, 12));
+    if (width <= 0 || holeCount <= 0)
+        return;
+    std::vector<uint16_t> dist = distanceToKnownCapped(hole, w, h, width + 1);
+    for (int k = 0; k < holeCount; ++k) {
+        const int i = holeList[k];
+        const int d = dist[i];
+        if (d <= 0 || d > width)
+            continue;
+        const int y = i / w;
+        const int x = i - y * w;
+        float samples = 0.f, sr = 0, sg = 0, sb = 0, sa = 0;
+        const int rad = 2 + (width > 3 ? 1 : 0);
+        for (int oy = -rad; oy <= rad; ++oy) {
+            const int ny = y + oy;
+            if (ny < 0 || ny >= h)
+                continue;
+            for (int ox = -rad; ox <= rad; ++ox) {
+                const int nx = x + ox;
+                if (nx < 0 || nx >= w)
+                    continue;
+                const int ni = ny * w + nx;
+                if (hole[ni])
+                    continue; // known only
+                const float spatial = 1.f / (1.f + 0.25f * (ox * ox + oy * oy));
+                const int c = ni * 3;
+                sr += srcRgb[c] * spatial;
+                sg += srcRgb[c + 1] * spatial;
+                sb += srcRgb[c + 2] * spatial;
+                sa += srcA[ni] * spatial;
+                samples += spatial;
+            }
+        }
+        if (samples <= 1e-6f)
+            continue;
+        const float inv = 1.f / samples;
+        // Stronger toward known at d=1, fades by softWidth (smoothstep).
+        const float edgePull = 1.f - smoothstep01((static_cast<float>(d) - 0.5f) / static_cast<float>(width));
+        const float blend = 0.72f * edgePull;
+        if (blend < 0.02f)
+            continue;
+        dstR[i] = clampByte(dstR[i] * (1.f - blend) + sr * inv * blend);
+        dstG[i] = clampByte(dstG[i] * (1.f - blend) + sg * inv * blend);
+        dstB[i] = clampByte(dstB[i] * (1.f - blend) + sb * inv * blend);
+        dstA[i] = clampByte(dstA[i] * (1.f - blend) + sa * inv * blend);
+    }
+}
+
 void harmonizePlanes(uint8_t *dstR, uint8_t *dstG, uint8_t *dstB, uint8_t *dstA,
                      const uint8_t *srcRgb, const uint8_t *srcA, const uint8_t *hole,
-                     const int32_t *holeList, int holeCount, int w, int h, bool feather)
+                     const int32_t *holeList, int holeCount, int w, int h,
+                     bool doEdgeFusion, const FillOptions &options)
 {
     const int n = w * h;
     for (int i = 0; i < n; ++i) {
@@ -845,7 +1028,9 @@ void harmonizePlanes(uint8_t *dstR, uint8_t *dstG, uint8_t *dstB, uint8_t *dstA,
         if (y > maxY) maxY = y;
     }
     const int diameter = std::max(std::max(maxX - minX, maxY - minY), 1);
-    const int iters = std::min(56, std::max(14, static_cast<int>(std::round(diameter * 0.45))));
+    const float strength = options.harmonizeStrength > 0.f ? options.harmonizeStrength : 1.f;
+    const int baseIters = std::min(72, std::max(20, static_cast<int>(std::round(diameter * 0.7))));
+    const int iters = std::min(120, std::max(20, static_cast<int>(std::round(baseIters * strength))));
 
     for (int iter = 0; iter < iters; ++iter) {
         const bool forward = (iter & 1) == 0;
@@ -895,8 +1080,17 @@ void harmonizePlanes(uint8_t *dstR, uint8_t *dstG, uint8_t *dstB, uint8_t *dstA,
         dstB[i] = static_cast<uint8_t>(b[i] + 0.5f);
         dstA[i] = static_cast<uint8_t>(a[i] + 0.5f);
     }
-    if (feather)
-        featherBoundary(dstR, dstG, dstB, dstA, srcRgb, srcA, hole, w, h);
+    if (doEdgeFusion) {
+        if (options.colorMatch)
+            matchBoundaryColors(dstR, dstG, dstB, dstA, srcRgb, srcA, hole,
+                                holeList, holeCount, w, h);
+        if (options.featherWidth > 0)
+            featherBoundary(dstR, dstG, dstB, dstA, srcRgb, srcA, hole, w, h,
+                            options.featherWidth);
+        if (options.softEdgeWidth > 0)
+            softEdgeBlend(dstR, dstG, dstB, dstA, srcRgb, srcA, hole,
+                          holeList, holeCount, w, h, options.softEdgeWidth);
+    }
 }
 
 void packRgba(const uint8_t *original, const uint8_t *r, const uint8_t *g, const uint8_t *b,
@@ -950,7 +1144,7 @@ void upsampleHoles(const uint8_t *coarse, int cw, int ch,
 }
 
 void harmonizeImage(const uint8_t *original, const uint8_t *filled, const uint8_t *mask,
-                    int w, int h, std::vector<uint8_t> &out)
+                    int w, int h, std::vector<uint8_t> &out, const FillOptions &options)
 {
     Level level = buildLevel(filled, mask, w, h);
     Level src = buildLevel(original, mask, w, h);
@@ -958,7 +1152,7 @@ void harmonizeImage(const uint8_t *original, const uint8_t *filled, const uint8_
     splitRgb(level.rgb.data(), dstR.data(), dstG.data(), dstB.data(), w * h);
     harmonizePlanes(dstR.data(), dstG.data(), dstB.data(), dstA.data(),
                     src.rgb.data(), src.alpha.data(), level.hole.data(),
-                    level.holeList.data(), level.holeCount, w, h, true);
+                    level.holeList.data(), level.holeCount, w, h, true, options);
     packRgba(original, dstR.data(), dstG.data(), dstB.data(), dstA.data(), level.hole.data(), w, h, out);
 }
 
@@ -967,7 +1161,7 @@ FillError fillFull(const uint8_t *rgba, const uint8_t *mask, int width, int heig
 {
     g_ringDist = nullptr;
     g_ringTrusted = 0;
-    const Quality quality = qualityFor(holeCount);
+    const Quality quality = resolveQuality(holeCount, options);
     Level finest = buildLevel(rgba, mask, width, height);
     if (finest.holeCount == 0)
         return FillError::Empty;
@@ -1078,7 +1272,7 @@ FillError fillFull(const uint8_t *rgba, const uint8_t *mask, int width, int heig
 
         harmonizePlanes(dstR.data(), dstG.data(), dstB.data(), dstA.data(),
                         level.rgb.data(), level.alpha.data(), level.hole.data(),
-                        level.holeList.data(), level.holeCount, w, h, isFinest);
+                        level.holeList.data(), level.holeCount, w, h, isFinest, options);
 
         coarseDstR = interleaveRgb(dstR.data(), dstG.data(), dstB.data(), n);
         coarseDstA = dstA;
@@ -1132,7 +1326,7 @@ FillError fillReduced(const uint8_t *rgba, const uint8_t *mask, int width, int h
     upsampleHoles(filledSmall.data(), cw, ch, rgba, mask, width, height, up);
     if (options.onProgress)
         options.onProgress(90);
-    harmonizeImage(rgba, up.data(), mask, width, height, outRgba);
+    harmonizeImage(rgba, up.data(), mask, width, height, outRgba, options);
     if (options.onProgress)
         options.onProgress(100);
     return FillError::Ok;
