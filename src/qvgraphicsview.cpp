@@ -4,12 +4,16 @@
 #include "qvcocoafunctions.h"
 #include "settingsmanager.h"
 #include <QWheelEvent>
+#include <QMouseEvent>
+#include <QDebug>
+#include <QApplication>
 #include <QGraphicsPixmapItem>
 #include <QGraphicsScene>
 #include <QSettings>
 #include <QMessageBox>
 #include <QMovie>
 #include <QtMath>
+#include <QByteArray>
 #include <QGestureEvent>
 #include <QScrollBar>
 #include <QtMath>
@@ -98,11 +102,8 @@ QVGraphicsView::QVGraphicsView(QWidget *parent) : QGraphicsView(parent)
 void QVGraphicsView::resizeEvent(QResizeEvent *event)
 {
     QGraphicsView::resizeEvent(event);
-    if (cropDragging) {
-        cropDragging = false;
-        if (cropRubberBand)
-            cropRubberBand->hide();
-    }
+    if (selectDragging)
+        clearSelectDrag();
     if (!isOriginalSize)
         resetScale();
     else
@@ -142,41 +143,32 @@ void QVGraphicsView::enterEvent(QEnterEvent *event)
 #endif
 {
     QGraphicsView::enterEvent(event);
-    viewport()->setCursor((cropMode || fillSelectMode) ? Qt::CrossCursor : Qt::ArrowCursor);
+    viewport()->setCursor(selectMode != SelectMode::None ? Qt::CrossCursor : Qt::ArrowCursor);
 }
 
 void QVGraphicsView::mousePressEvent(QMouseEvent *event)
 {
-    if (cropMode && event->button() == Qt::RightButton) {
-        cancelCrop();
+    if (selectMode != SelectMode::None && event->button() == Qt::RightButton) {
+        if (selectMode == SelectMode::Crop)
+            cancelCrop();
+        else
+            cancelFillSelect();
         event->accept();
         return;
     }
 
-    if (fillSelectMode && event->button() == Qt::RightButton) {
-        cancelFillSelect();
-        event->accept();
-        return;
-    }
-
-    if (cropMode && event->button() == Qt::LeftButton && canEditStill()) {
-        cropDragging = true;
-        cropOrigin = event->pos();
-        if (!cropRubberBand)
-            cropRubberBand = new QRubberBand(QRubberBand::Rectangle, viewport());
-        cropRubberBand->setGeometry(QRect(cropOrigin, QSize(1, 1)));
-        cropRubberBand->show();
-        event->accept();
-        return;
-    }
-
-    if (fillSelectMode && event->button() == Qt::LeftButton && canEditStill()) {
-        fillDragging = true;
-        fillOrigin = event->pos();
-        if (!fillRubberBand)
-            fillRubberBand = new QRubberBand(QRubberBand::Rectangle, viewport());
-        fillRubberBand->setGeometry(QRect(fillOrigin, QSize(1, 1)));
-        fillRubberBand->show();
+    if (selectMode != SelectMode::None && event->button() == Qt::LeftButton && canEditStill()) {
+        selectDragging = true;
+        selectOrigin = event->pos();
+        if (!selectRubberBand)
+            selectRubberBand = new QRubberBand(QRubberBand::Rectangle, viewport());
+        selectRubberBand->setGeometry(QRect(selectOrigin, QSize(1, 1)));
+        selectRubberBand->show();
+        if (cafDebugEnabled()) {
+            qInfo().nospace() << "CAF: press mode="
+                              << (selectMode == SelectMode::Fill ? "fill" : "crop")
+                              << " origin=" << selectOrigin;
+        }
         event->accept();
         return;
     }
@@ -237,22 +229,12 @@ void QVGraphicsView::mousePressEvent(QMouseEvent *event)
 
 void QVGraphicsView::mouseMoveEvent(QMouseEvent *event)
 {
-    if (cropDragging && cropRubberBand) {
+    if (selectDragging && selectRubberBand && selectMode != SelectMode::None) {
         const QRect imageOnView =
                 mapFromScene(loadedPixmapItem->sceneBoundingRect()).boundingRect();
         const QRect selection =
-                QRect(cropOrigin, event->pos()).normalized().intersected(imageOnView);
-        cropRubberBand->setGeometry(selection);
-        event->accept();
-        return;
-    }
-
-    if (fillDragging && fillRubberBand) {
-        const QRect imageOnView =
-                mapFromScene(loadedPixmapItem->sceneBoundingRect()).boundingRect();
-        const QRect selection =
-                QRect(fillOrigin, event->pos()).normalized().intersected(imageOnView);
-        fillRubberBand->setGeometry(selection);
+                QRect(selectOrigin, event->pos()).normalized().intersected(imageOnView);
+        selectRubberBand->setGeometry(selection);
         event->accept();
         return;
     }
@@ -276,12 +258,26 @@ void QVGraphicsView::mouseMoveEvent(QMouseEvent *event)
 
 void QVGraphicsView::mouseReleaseEvent(QMouseEvent *event)
 {
-    if (cropDragging && event->button() == Qt::LeftButton) {
-        cropDragging = false;
-        const QRect selection = cropRubberBand ? cropRubberBand->geometry() : QRect();
-        if (cropRubberBand)
-            cropRubberBand->hide();
+    if (selectDragging && event->button() == Qt::LeftButton && selectMode != SelectMode::None) {
+        const SelectMode mode = selectMode; // capture before cancel clears it
+        const QRect selection = selectRubberBand ? selectRubberBand->geometry() : QRect();
+        clearSelectDrag();
         const QRect pixels = pixmapRectForViewportRect(selection);
+
+        if (mode == SelectMode::Fill) {
+            if (cafDebugEnabled()) {
+                qInfo().nospace() << "CAF: release fill rect=" << pixels
+                                  << " (will emit fillSelectionReady, never crop)";
+            }
+            if (pixels.width() >= 2 && pixels.height() >= 2) {
+                cancelFillSelect();
+                emit fillSelectionReady(pixels);
+            }
+            event->accept();
+            return;
+        }
+
+        // Crop only
         const QSize fullSize = getLoadedPixmap().size();
         if (pixels.width() >= 2 && pixels.height() >= 2 && pixels.size() != fullSize)
             imageCore.cropImage(pixels);
@@ -291,24 +287,10 @@ void QVGraphicsView::mouseReleaseEvent(QMouseEvent *event)
         return;
     }
 
-    if (fillDragging && event->button() == Qt::LeftButton) {
-        fillDragging = false;
-        const QRect selection = fillRubberBand ? fillRubberBand->geometry() : QRect();
-        if (fillRubberBand)
-            fillRubberBand->hide();
-        const QRect pixels = pixmapRectForViewportRect(selection);
-        if (pixels.width() >= 2 && pixels.height() >= 2) {
-            cancelFillSelect();
-            emit fillSelectionReady(pixels);
-        }
-        event->accept();
-        return;
-    }
-
     mousePressButton = Qt::NoButton;
     mousePressModifiers = Qt::NoModifier;
     QGraphicsView::mouseReleaseEvent(event);
-    viewport()->setCursor((cropMode || fillSelectMode) ? Qt::CrossCursor : Qt::ArrowCursor);
+    viewport()->setCursor(selectMode != SelectMode::None ? Qt::CrossCursor : Qt::ArrowCursor);
 }
 
 bool QVGraphicsView::event(QEvent *event)
@@ -940,35 +922,76 @@ void QVGraphicsView::flipImage()
     imageCore.flipImage();
 }
 
+bool QVGraphicsView::cafDebugEnabled() const
+{
+    static const bool enabled = qEnvironmentVariableIsSet("QV_CAF_DEBUG");
+    return enabled;
+}
+
+void QVGraphicsView::clearSelectDrag()
+{
+    selectDragging = false;
+    if (selectRubberBand)
+        selectRubberBand->hide();
+}
+
+void QVGraphicsView::setSelectMode(SelectMode mode)
+{
+    if (selectMode == mode) {
+        clearSelectDrag();
+        if (mode != SelectMode::None) {
+            setDragMode(QGraphicsView::NoDrag);
+            viewport()->setCursor(Qt::CrossCursor);
+            setFocus(Qt::OtherFocusReason);
+        }
+        return;
+    }
+
+    const SelectMode previous = selectMode;
+    clearSelectDrag();
+    selectMode = mode;
+
+    if (previous == SelectMode::Crop)
+        emit cropModeChanged(false);
+    else if (previous == SelectMode::Fill)
+        emit fillSelectModeChanged(false);
+
+    if (mode == SelectMode::None) {
+        setDragMode(QGraphicsView::ScrollHandDrag);
+        viewport()->setCursor(Qt::ArrowCursor);
+    } else {
+        setDragMode(QGraphicsView::NoDrag);
+        viewport()->setCursor(Qt::CrossCursor);
+        setFocus(Qt::OtherFocusReason);
+        if (mode == SelectMode::Crop)
+            emit cropModeChanged(true);
+        else
+            emit fillSelectModeChanged(true);
+    }
+
+    if (cafDebugEnabled()) {
+        const char *name = mode == SelectMode::None   ? "none"
+                : mode == SelectMode::Crop ? "crop"
+                                           : "fill";
+        qInfo().nospace() << "CAF: setSelectMode=" << name;
+    }
+}
+
 bool QVGraphicsView::beginCrop()
 {
     if (!canEditStill())
         return false;
 
-    cancelFillSelect();
-    cropMode = true;
-    cropDragging = false;
-    setDragMode(QGraphicsView::NoDrag);
-    viewport()->setCursor(Qt::CrossCursor);
-    setFocus(Qt::OtherFocusReason);
-    emit cropModeChanged(true);
+    setSelectMode(SelectMode::Crop);
     return true;
 }
 
 void QVGraphicsView::cancelCrop()
 {
-    if (!cropMode && !cropDragging)
+    // Never touch Fill mode / its drag — exclusivity is owned by setSelectMode.
+    if (selectMode != SelectMode::Crop)
         return;
-
-    cropMode = false;
-    cropDragging = false;
-    if (cropRubberBand)
-        cropRubberBand->hide();
-    if (!fillSelectMode) {
-        setDragMode(QGraphicsView::ScrollHandDrag);
-        viewport()->setCursor(Qt::ArrowCursor);
-    }
-    emit cropModeChanged(false);
+    setSelectMode(SelectMode::None);
 }
 
 bool QVGraphicsView::beginFillSelect()
@@ -976,30 +999,15 @@ bool QVGraphicsView::beginFillSelect()
     if (!canEditStill())
         return false;
 
-    cancelCrop();
-    fillSelectMode = true;
-    fillDragging = false;
-    setDragMode(QGraphicsView::NoDrag);
-    viewport()->setCursor(Qt::CrossCursor);
-    setFocus(Qt::OtherFocusReason);
-    emit fillSelectModeChanged(true);
+    setSelectMode(SelectMode::Fill);
     return true;
 }
 
 void QVGraphicsView::cancelFillSelect()
 {
-    if (!fillSelectMode && !fillDragging)
+    if (selectMode != SelectMode::Fill)
         return;
-
-    fillSelectMode = false;
-    fillDragging = false;
-    if (fillRubberBand)
-        fillRubberBand->hide();
-    if (!cropMode) {
-        setDragMode(QGraphicsView::ScrollHandDrag);
-        viewport()->setCursor(Qt::ArrowCursor);
-    }
-    emit fillSelectModeChanged(false);
+    setSelectMode(SelectMode::None);
 }
 
 void QVGraphicsView::applyContentAwareResult(const QImage &image)
@@ -1055,4 +1063,54 @@ QRect QVGraphicsView::pixmapRectForViewportRect(const QRect &viewportRect) const
             qCeil((selected.bottom() - bounds.top()) / bounds.height() * pixmapSize.height());
     return QRect(QPoint(x, y), QPoint(right, bottom))
             .intersected(QRect(QPoint(0, 0), pixmapSize));
+}
+
+QRect QVGraphicsView::viewportRectForPixmapRect(const QRect &imageRect) const
+{
+    const QRectF bounds = loadedPixmapItem->sceneBoundingRect();
+    const QSize pixmapSize = getLoadedPixmap().size();
+    if (bounds.isEmpty() || pixmapSize.isEmpty() || imageRect.isEmpty())
+        return {};
+
+    const QRect bounded = imageRect.intersected(QRect(QPoint(0, 0), pixmapSize));
+    if (bounded.isEmpty())
+        return {};
+
+    const qreal x0 = bounds.left() + qreal(bounded.left()) / pixmapSize.width() * bounds.width();
+    const qreal y0 = bounds.top() + qreal(bounded.top()) / pixmapSize.height() * bounds.height();
+    const qreal x1 = bounds.left() + qreal(bounded.right() + 1) / pixmapSize.width() * bounds.width();
+    const qreal y1 = bounds.top() + qreal(bounded.bottom() + 1) / pixmapSize.height() * bounds.height();
+    return mapFromScene(QRectF(QPointF(x0, y0), QPointF(x1, y1))).boundingRect();
+}
+
+QRect QVGraphicsView::simulateFillDrag(const QRect &imageRect)
+{
+    if (selectMode != SelectMode::Fill || !canEditStill())
+        return {};
+
+    const QRect viewRect = viewportRectForPixmapRect(imageRect);
+    if (viewRect.width() < 2 || viewRect.height() < 2)
+        return {};
+
+    QRect emitted;
+    const QMetaObject::Connection conn = connect(
+            this, &QVGraphicsView::fillSelectionReady, this,
+            [&emitted](const QRect &r) { emitted = r; }, Qt::DirectConnection);
+
+    const QPoint topLeft = viewRect.topLeft() + QPoint(1, 1);
+    const QPoint bottomRight = viewRect.bottomRight() - QPoint(1, 1);
+
+    auto send = [this](QEvent::Type type, const QPoint &pos, Qt::MouseButton button,
+                       Qt::MouseButtons buttons) {
+        QMouseEvent event(type, QPointF(pos), QPointF(viewport()->mapToGlobal(pos)), button,
+                          buttons, Qt::NoModifier);
+        QApplication::sendEvent(viewport(), &event);
+    };
+
+    send(QEvent::MouseButtonPress, topLeft, Qt::LeftButton, Qt::LeftButton);
+    send(QEvent::MouseMove, bottomRight, Qt::NoButton, Qt::LeftButton);
+    send(QEvent::MouseButtonRelease, bottomRight, Qt::LeftButton, Qt::NoButton);
+
+    disconnect(conn);
+    return emitted;
 }

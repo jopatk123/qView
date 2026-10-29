@@ -117,6 +117,9 @@ public:
 
     void contentAwareFill();
 
+    // Env QV_CAF_SELFTEST: load path, drag-fill hole, exit code via return.
+    int runCafSelfTest(const QString &imagePath);
+
     void compressImage();
 
     void batchCompress();

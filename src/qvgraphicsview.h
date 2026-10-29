@@ -24,6 +24,9 @@ public:
     enum class GoToFileMode { constant, first, previous, next, last };
     Q_ENUM(GoToFileMode)
 
+    // Exclusive rubber-band tool: at most one of Crop / Fill.
+    enum class SelectMode { None, Crop, Fill };
+
     QMimeData *getMimeData() const;
     void loadMimeData(const QMimeData *mimeData);
     void loadFile(const QString &fileName);
@@ -59,12 +62,16 @@ public:
     void flipImage();
     bool beginCrop();
     void cancelCrop();
-    bool isCropping() const { return cropMode; }
+    bool isCropping() const { return selectMode == SelectMode::Crop; }
     // Content-aware fill: drag a rectangle; hole = selection, known = outside.
     bool beginFillSelect();
     void cancelFillSelect();
-    bool isFillSelecting() const { return fillSelectMode; }
+    bool isFillSelecting() const { return selectMode == SelectMode::Fill; }
     void applyContentAwareResult(const QImage &image);
+    // Test helper: with Fill mode active, synthesize a drag over imageRect (pixmap space).
+    // Returns the pixmap rect that would be emitted (empty if aborted).
+    QRect simulateFillDrag(const QRect &imageRect);
+    QRect viewportRectForPixmapRect(const QRect &imageRect) const;
     bool compressImage(const QSize &targetSize, int quality);
     bool applyCompression(const QVImageCore::CompressionOutput &output, int quality);
     QByteArray originalFormat() const { return imageCore.originalFormat(); }
@@ -171,14 +178,14 @@ private:
     Qt::KeyboardModifiers mousePressModifiers;
     QPoint mousePressPosition;
 
-    bool cropMode = false;
-    bool cropDragging = false;
-    QPoint cropOrigin;
-    QRubberBand *cropRubberBand = nullptr;
+    // Single exclusive selection tool — Crop and Fill must never be active together.
+    SelectMode selectMode = SelectMode::None;
+    bool selectDragging = false;
+    QPoint selectOrigin;
+    QRubberBand *selectRubberBand = nullptr;
 
-    bool fillSelectMode = false;
-    bool fillDragging = false;
-    QPoint fillOrigin;
-    QRubberBand *fillRubberBand = nullptr;
+    void setSelectMode(SelectMode mode);
+    void clearSelectDrag();
+    bool cafDebugEnabled() const;
 };
 #endif // QVGRAPHICSVIEW_H

@@ -16,6 +16,9 @@
 #include <QDir>
 #include <QFile>
 #include <QMessageBox>
+#include <QThread>
+#include <QFileInfo>
+#include <QDebug>
 #include <QString>
 #include <QGraphicsPixmapItem>
 #include <QPixmap>
@@ -1410,6 +1413,116 @@ void MainWindow::revertImage()
     graphicsView->revertEdits();
 }
 
+int MainWindow::runCafSelfTest(const QString &imagePath)
+{
+    openFile(imagePath);
+    for (int i = 0; i < 100; ++i) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        if (graphicsView->canEditStill()
+            && graphicsView->getCurrentFileDetails().fileInfo.absoluteFilePath()
+                    == QFileInfo(imagePath).absoluteFilePath())
+            break;
+        QThread::msleep(50);
+    }
+    // Extra settle so no stale loader can replace the pixmap mid-test.
+    for (int i = 0; i < 10; ++i) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QThread::msleep(20);
+    }
+    if (!graphicsView->canEditStill()) {
+        qWarning().nospace() << "CAF self-test: image not editable"
+                             << " loaded=" << graphicsView->getCurrentFileDetails().isPixmapLoaded
+                             << " movie=" << graphicsView->getCurrentFileDetails().isMovieLoaded
+                             << " path=" << graphicsView->getCurrentFileDetails().fileInfo.absoluteFilePath();
+        return 10;
+    }
+
+    const QSize beforeSize = graphicsView->getLoadedPixmap().size();
+    const QImage before = graphicsView->getLoadedPixmap().toImage().convertToFormat(QImage::Format_ARGB32);
+
+    // Detect cyan hole #28b4dc-ish
+    int minX = before.width(), minY = before.height(), maxX = -1, maxY = -1;
+    for (int y = 0; y < before.height(); ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(before.constScanLine(y));
+        for (int x = 0; x < before.width(); ++x) {
+            const int r = qRed(line[x]), g = qGreen(line[x]), b = qBlue(line[x]);
+            if (r < 80 && g >= 160 && g <= 200 && b >= 200) {
+                minX = qMin(minX, x);
+                minY = qMin(minY, y);
+                maxX = qMax(maxX, x);
+                maxY = qMax(maxY, y);
+            }
+        }
+    }
+    if (maxX < 0) {
+        qWarning("CAF self-test: no cyan hole");
+        return 11;
+    }
+    const QRect hole(minX, minY, maxX - minX + 1, maxY - minY + 1);
+    qInfo().nospace() << "CAF self-test: hole=" << hole << " image=" << beforeSize;
+
+    // Ensure we are NOT in crop; enter fill via the same path as the toolbar.
+    if (graphicsView->isCropping())
+        graphicsView->cancelCrop();
+    if (graphicsView->isFillSelecting())
+        graphicsView->cancelFillSelect();
+    if (!graphicsView->beginFillSelect()) {
+        qWarning("CAF self-test: beginFillSelect failed");
+        return 12;
+    }
+    if (graphicsView->isCropping()) {
+        qWarning("CAF self-test: crop still active after beginFillSelect");
+        return 13;
+    }
+
+    const QRect emitted = graphicsView->simulateFillDrag(hole);
+    if (emitted.isEmpty()) {
+        qWarning("CAF self-test: fillSelectionReady NOT emitted (bug: likely cropped instead)");
+        const QSize afterDrag = graphicsView->getLoadedPixmap().size();
+        if (afterDrag != beforeSize) {
+            qWarning().nospace() << "CAF self-test: size changed after drag " << beforeSize
+                                 << " -> " << afterDrag << " (crop path)";
+            return 14;
+        }
+        return 15;
+    }
+    qInfo().nospace() << "CAF self-test: fillSelectionReady " << emitted
+                      << " cafRunning=" << cafRunning;
+
+    // Wait for async fill (finished is queued to GUI thread).
+    if (!cafRunning) {
+        qWarning("CAF self-test: cafRunning false right after emit — fill never started?");
+        return 18;
+    }
+    for (int i = 0; i < 600 && cafRunning; ++i) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QThread::msleep(20);
+    }
+    for (int i = 0; i < 20; ++i) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QThread::msleep(20);
+    }
+    qInfo().nospace() << "CAF self-test: after wait cafRunning=" << cafRunning
+                      << " modified=" << graphicsView->isImageModified();
+
+    const QSize afterSize = graphicsView->getLoadedPixmap().size();
+    if (afterSize != beforeSize) {
+        qWarning().nospace() << "CAF self-test: FAIL size " << beforeSize << " -> " << afterSize;
+        return 16;
+    }
+
+    const QImage after = graphicsView->getLoadedPixmap().toImage().convertToFormat(QImage::Format_ARGB32);
+    const QRgb center = after.pixel(hole.center());
+    const int r = qRed(center), g = qGreen(center), b = qBlue(center);
+    if (r < 80 && g >= 160 && g <= 200 && b >= 200) {
+        qWarning("CAF self-test: hole center still cyan");
+        return 17;
+    }
+
+    qInfo("CAF self-test: PASS");
+    return 0;
+}
+
 void MainWindow::cropImage()
 {
     if (graphicsView->isFillSelecting())
@@ -1447,6 +1560,10 @@ void MainWindow::contentAwareFill()
 
 void MainWindow::onFillSelectionReady(const QRect &imageRect)
 {
+    if (qEnvironmentVariableIsSet("QV_CAF_DEBUG")) {
+        qInfo().nospace() << "CAF: onFillSelectionReady rect=" << imageRect
+                          << " size=" << graphicsView->getLoadedPixmap().size();
+    }
     if (cafRunning)
         return;
     if (!graphicsView->canEditStill())
@@ -1493,20 +1610,12 @@ void MainWindow::runContentAwareFill(const QRect &imageRect)
 
     auto *watcher = new QFutureWatcher<qvcaf::QtFillResult>(this);
 
-    const QRect hole = imageRect;
-    watcher->setFuture(QtConcurrent::run([source, hole, progress]() {
-        qvcaf::FillOptions options;
-        options.onProgress = [progress](int percent) {
-            QMetaObject::invokeMethod(progress, "setValue", Qt::QueuedConnection,
-                                      Q_ARG(int, percent));
-        };
-        return qvcaf::fillImage(source, hole, options);
-    }));
-
     connect(progress, &QProgressDialog::canceled, this, [watcher]() {
         Q_UNUSED(watcher);
     });
 
+    // Connect finished BEFORE setFuture — a small hole can finish in the same
+    // tick and would otherwise drop the result (never apply, looks like a no-op).
     connect(watcher, &QFutureWatcher<qvcaf::QtFillResult>::finished, this,
             [this, watcher, progress]() {
                 progress->reset();
@@ -1534,8 +1643,22 @@ void MainWindow::runContentAwareFill(const QRect &imageRect)
                     return;
                 }
 
+                if (qEnvironmentVariableIsSet("QV_CAF_DEBUG")) {
+                    qInfo().nospace() << "CAF: apply result size=" << result.image.size()
+                                      << " err=" << int(result.error);
+                }
                 graphicsView->applyContentAwareResult(result.image);
             });
+
+    const QRect hole = imageRect;
+    watcher->setFuture(QtConcurrent::run([source, hole, progress]() {
+        qvcaf::FillOptions options;
+        options.onProgress = [progress](int percent) {
+            QMetaObject::invokeMethod(progress, "setValue", Qt::QueuedConnection,
+                                      Q_ARG(int, percent));
+        };
+        return qvcaf::fillImage(source, hole, options);
+    }));
 }
 
 void MainWindow::compressImage()
