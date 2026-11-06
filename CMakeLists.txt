@@ -190,7 +190,7 @@ elseif(APPLE)
     # macOS specific: link to Cocoa framework and configure the app bundle.
     if(NOT NO_COCOA)
         target_compile_definitions(${PROJECT_NAME} PRIVATE COCOA_LOADED)
-        set(PLATFORM_SPECIFIC_LIBS "-framework Cocoa")
+        set(PLATFORM_SPECIFIC_LIBS "-framework Cocoa" "-framework ImageIO")
         target_link_libraries(${PROJECT_NAME} PRIVATE ${PLATFORM_SPECIFIC_LIBS})
     endif()
 

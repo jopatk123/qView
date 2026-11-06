@@ -859,6 +859,22 @@ No write permission or file is read-only.</source>
         <source>%1 x %2 (%3 MP)</source>
         <translation>%1 x %2 (%3 MP)</translation>
     </message>
+    <message>
+        <source>Taken:</source>
+        <translation>拍摄时间:</translation>
+    </message>
+    <message>
+        <source>Camera:</source>
+        <translation>相机:</translation>
+    </message>
+    <message>
+        <source>Exposure:</source>
+        <translation>曝光:</translation>
+    </message>
+    <message>
+        <source>GPS:</source>
+        <translation>位置:</translation>
+    </message>
 </context>
 <context>
     <name>QVOpenWithDialog</name>
@@ -1892,6 +1908,22 @@ You can reenable them in the options dialog.</source>
         <location filename="../src/qvfileinfopanel.cpp" line="59"/>
         <source>Frames:</source>
         <translation>帧数:</translation>
+    </message>
+    <message>
+        <source>Taken:</source>
+        <translation>拍摄时间:</translation>
+    </message>
+    <message>
+        <source>Camera:</source>
+        <translation>相机:</translation>
+    </message>
+    <message>
+        <source>Exposure:</source>
+        <translation>曝光:</translation>
+    </message>
+    <message>
+        <source>GPS:</source>
+        <translation>位置:</translation>
     </message>
     <message>
         <location filename="../src/qvfileinfopanel.cpp" line="176"/>

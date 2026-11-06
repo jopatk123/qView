@@ -1,6 +1,7 @@
 #include "qvfileinfopanel.h"
 #include "qvapplication.h"
 
+#include <QCursor>
 #include <QFormLayout>
 #include <QKeyEvent>
 #include <QLabel>
@@ -8,6 +9,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QScrollArea>
+#include <QSettings>
 #include <QVBoxLayout>
 
 static QString softWrap(const QString &text, const QFontMetrics &metrics, int width)
@@ -46,6 +48,10 @@ QVFileInfoPanel::QVFileInfoPanel(QWidget *parent) : QWidget(parent)
 {
     setFocusPolicy(Qt::NoFocus);
     setAutoFillBackground(false);
+    setMouseTracking(true);
+    panelWidth = clampedWidth(QSettings().value(QStringLiteral("fileinfopanelwidth"),
+                                                DEFAULT_WIDTH)
+                                      .toInt());
 
     formWidget = new QWidget(this);
     formWidget->setAutoFillBackground(false);
@@ -67,6 +73,14 @@ QVFileInfoPanel::QVFileInfoPanel(QWidget *parent) : QWidget(parent)
     ratioValue = addRow(form, tr("Aspect Ratio:"));
     framesValue = addRow(form, tr("Frames:"));
     framesKey = qobject_cast<QLabel *>(form->labelForField(framesValue));
+    takenValue = addRow(form, tr("Taken:"));
+    takenKey = qobject_cast<QLabel *>(form->labelForField(takenValue));
+    cameraValue = addRow(form, tr("Camera:"));
+    cameraKey = qobject_cast<QLabel *>(form->labelForField(cameraValue));
+    exposureValue = addRow(form, tr("Exposure:"));
+    exposureKey = qobject_cast<QLabel *>(form->labelForField(exposureValue));
+    gpsValue = addRow(form, tr("GPS:"));
+    gpsKey = qobject_cast<QLabel *>(form->labelForField(gpsValue));
 
     // Double-clicking the name edits it in place. The editor covers the label
     // instead of replacing it so the form row keeps its height while editing.
@@ -99,6 +113,7 @@ QVFileInfoPanel::QVFileInfoPanel(QWidget *parent) : QWidget(parent)
 
     settingsUpdated();
     applyChrome();
+    updateText();
 }
 
 QLabel *QVFileInfoPanel::addRow(QFormLayout *form, const QString &labelText)
@@ -174,7 +189,7 @@ void QVFileInfoPanel::applyChrome()
 
     if (vertical) {
         box->setContentsMargins(TEXT_MARGIN, TEXT_MARGIN + titlebarInset, TEXT_MARGIN, TEXT_MARGIN);
-        setFixedWidth(PANEL_WIDTH);
+        setFixedWidth(panelWidth);
         setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
     } else {
         // The bottom strip shows one merged line without a name field to edit
@@ -218,12 +233,24 @@ void QVFileInfoPanel::updateText()
     };
 
     if (vertical) {
+        const auto setOptionalVisible = [](QLabel *key, QLabel *value, const QString &text) {
+            const bool visible = !text.isEmpty();
+            if (key)
+                key->setVisible(visible);
+            value->setVisible(visible);
+        };
+        setOptionalVisible(framesKey, framesValue, fields.frames);
+        setOptionalVisible(takenKey, takenValue, fields.taken);
+        setOptionalVisible(cameraKey, cameraValue, fields.camera);
+        setOptionalVisible(exposureKey, exposureValue, fields.exposure);
+        setOptionalVisible(gpsKey, gpsValue, fields.gps);
+
         int keyWidth = 0;
         for (QLabel *key : keys) {
             if (!key->isHidden())
                 keyWidth = qMax(keyWidth, key->sizeHint().width());
         }
-        const int valueWidth = qMax(48, PANEL_WIDTH - TEXT_MARGIN * 2 - 12 - keyWidth);
+        const int valueWidth = qMax(48, width() - TEXT_MARGIN * 2 - 12 - keyWidth);
         // While editing, the label stays empty so a resize can't repaint the old
         // name underneath the editor
         if (editingName) {
@@ -238,11 +265,16 @@ void QVFileInfoPanel::updateText()
         showValue(modifiedValue, fields.modified, valueWidth);
         showValue(dimensionsValue, fields.dimensions, valueWidth);
         showValue(ratioValue, fields.ratio, valueWidth);
-        showValue(framesValue, fields.frames, valueWidth);
-        const bool hasFrames = !fields.frames.isEmpty();
-        if (framesKey)
-            framesKey->setVisible(hasFrames);
-        framesValue->setVisible(hasFrames);
+        if (framesValue->isVisible())
+            showValue(framesValue, fields.frames, valueWidth);
+        if (takenValue->isVisible())
+            showValue(takenValue, fields.taken, valueWidth);
+        if (cameraValue->isVisible())
+            showValue(cameraValue, fields.camera, valueWidth);
+        if (exposureValue->isVisible())
+            showValue(exposureValue, fields.exposure, valueWidth);
+        if (gpsValue->isVisible())
+            showValue(gpsValue, fields.gps, valueWidth);
         summaryLabel->setToolTip({});
         if (editingName)
             positionNameEditor();
@@ -256,7 +288,8 @@ void QVFileInfoPanel::updateText()
             presentParts({ fields.name, fields.dimensions, fields.size, framesText }).join(
                     QStringLiteral("   ·   "));
     const QString line2 =
-            presentParts({ fields.type, fields.ratio, fields.modified, fields.location })
+            presentParts({ fields.taken, fields.camera, fields.gps, fields.type, fields.ratio,
+                           fields.modified, fields.location })
                     .join(QStringLiteral("   ·   "));
     const int available = qMax(summaryLabel->width(), width() - TEXT_MARGIN * 2);
     const QFontMetrics metrics = summaryLabel->fontMetrics();
@@ -275,6 +308,81 @@ void QVFileInfoPanel::resizeEvent(QResizeEvent *event)
     updatingText = true;
     updateText();
     updatingText = false;
+}
+
+bool QVFileInfoPanel::inResizeHandle(const QPoint &pos) const
+{
+    return vertical && pos.x() >= 0 && pos.x() < HANDLE_WIDTH;
+}
+
+int QVFileInfoPanel::clampedWidth(int width) const
+{
+    int maxWidth = int(MAX_WIDTH);
+    if (parentWidget())
+        maxWidth = qMin(maxWidth, qMax(int(MIN_WIDTH), parentWidget()->width() / 2));
+    return qBound(int(MIN_WIDTH), width, maxWidth);
+}
+
+void QVFileInfoPanel::applyPanelWidth(int width, bool persist)
+{
+    width = clampedWidth(width);
+    if (width == panelWidth && this->width() == width)
+        return;
+
+    panelWidth = width;
+    if (vertical)
+        setFixedWidth(panelWidth);
+    if (persist)
+        QSettings().setValue(QStringLiteral("fileinfopanelwidth"), panelWidth);
+}
+
+void QVFileInfoPanel::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton && inResizeHandle(event->pos())) {
+        resizing = true;
+        dragStartX = event->globalPos().x();
+        dragStartWidth = width();
+        grabMouse();
+        setCursor(Qt::SplitHCursor);
+        event->accept();
+        return;
+    }
+    QWidget::mousePressEvent(event);
+}
+
+void QVFileInfoPanel::mouseMoveEvent(QMouseEvent *event)
+{
+    if (resizing) {
+        // The panel sits on the right, so dragging the left edge leftward widens it
+        const int delta = dragStartX - event->globalPos().x();
+        applyPanelWidth(dragStartWidth + delta, false);
+        event->accept();
+        return;
+    }
+
+    setCursor(inResizeHandle(event->pos()) ? Qt::SplitHCursor : Qt::ArrowCursor);
+    QWidget::mouseMoveEvent(event);
+}
+
+void QVFileInfoPanel::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (resizing && event->button() == Qt::LeftButton) {
+        resizing = false;
+        releaseMouse();
+        applyPanelWidth(width(), true);
+        setCursor(inResizeHandle(mapFromGlobal(QCursor::pos())) ? Qt::SplitHCursor
+                                                                : Qt::ArrowCursor);
+        event->accept();
+        return;
+    }
+    QWidget::mouseReleaseEvent(event);
+}
+
+void QVFileInfoPanel::leaveEvent(QEvent *event)
+{
+    if (!resizing)
+        unsetCursor();
+    QWidget::leaveEvent(event);
 }
 
 bool QVFileInfoPanel::eventFilter(QObject *watched, QEvent *event)

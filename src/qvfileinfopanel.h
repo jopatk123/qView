@@ -43,6 +43,10 @@ signals:
 protected:
     void paintEvent(QPaintEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+    void leaveEvent(QEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
@@ -53,6 +57,9 @@ private:
     void beginNameEdit();
     void finishNameEdit(bool commit);
     void positionNameEditor();
+    bool inResizeHandle(const QPoint &pos) const;
+    int clampedWidth(int width) const;
+    void applyPanelWidth(int width, bool persist);
 
     QScrollArea *scrollArea;
     QWidget *formWidget;
@@ -68,19 +75,36 @@ private:
     QLabel *ratioValue;
     QLabel *framesKey;
     QLabel *framesValue;
+    QLabel *takenKey;
+    QLabel *takenValue;
+    QLabel *cameraKey;
+    QLabel *cameraValue;
+    QLabel *exposureKey;
+    QLabel *exposureValue;
+    QLabel *gpsKey;
+    QLabel *gpsValue;
     QList<QLabel *> keys;
 
     QVFileInfoFields fields;
     QFileInfo currentFileInfo;
     QColor customBackgroundColor;
     int titlebarInset = 0;
+    int panelWidth = DEFAULT_WIDTH;
+    int dragStartX = 0;
+    int dragStartWidth = 0;
     bool vertical = true;
     bool positionSet = false;
     bool updatingText = false;
     bool editingName = false;
+    bool resizing = false;
 
-    static const int PANEL_WIDTH = 260;
-    static const int TEXT_MARGIN = 10;
+    enum {
+        DEFAULT_WIDTH = 260,
+        MIN_WIDTH = 180,
+        MAX_WIDTH = 640,
+        HANDLE_WIDTH = 6,
+        TEXT_MARGIN = 10
+    };
 };
 
 #endif // QVFILEINFOPANEL_H

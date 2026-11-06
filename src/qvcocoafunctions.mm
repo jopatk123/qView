@@ -3,10 +3,13 @@
 
 #include <QUrl>
 #include <QDebug>
+#include <QDateTime>
 #include <QFileIconProvider>
 #include <QCollator>
+#include <QLocale>
 
 #import <Cocoa/Cocoa.h>
+#import <ImageIO/ImageIO.h>
 
 static void fixNativeMenuEccentricities(QMenu *menu, NSMenu *nativeMenu)
 {
@@ -302,6 +305,181 @@ QString QVCocoaFunctions::deleteFile(const QString &filePath)
     }
 
     return QString::fromNSString(resultUrl.absoluteString);
+}
+
+static QString cocoaObjectToString(id value)
+{
+    if (!value || value == (id)kCFNull)
+        return {};
+    if ([value isKindOfClass:[NSString class]])
+        return QString::fromNSString((NSString *)value);
+    if ([value isKindOfClass:[NSNumber class]])
+        return QString::number([(NSNumber *)value doubleValue], 'g', 12);
+    return {};
+}
+
+static double cocoaObjectToDouble(id value, bool *ok)
+{
+    if (ok)
+        *ok = false;
+    if (!value || value == (id)kCFNull)
+        return 0;
+
+    if ([value isKindOfClass:[NSNumber class]]) {
+        if (ok)
+            *ok = true;
+        return [(NSNumber *)value doubleValue];
+    }
+
+    if ([value isKindOfClass:[NSArray class]]) {
+        NSArray *parts = (NSArray *)value;
+        if (parts.count == 0)
+            return 0;
+        double degrees = cocoaObjectToDouble(parts[0], ok);
+        const double minutes = parts.count > 1 ? cocoaObjectToDouble(parts[1], nullptr) : 0;
+        const double seconds = parts.count > 2 ? cocoaObjectToDouble(parts[2], nullptr) : 0;
+        if (ok)
+            *ok = true;
+        return degrees + minutes / 60.0 + seconds / 3600.0;
+    }
+
+    return 0;
+}
+
+static QString formatExposureTime(double seconds)
+{
+    if (seconds <= 0)
+        return {};
+    if (seconds >= 1.0)
+        return QString::number(seconds, 'f', seconds >= 10.0 ? 0 : 1) + QLatin1Char('s');
+    const int denom = qMax(1, qRound(1.0 / seconds));
+    return QStringLiteral("1/%1s").arg(denom);
+}
+
+static QString formatExifDate(const QString &raw)
+{
+    QDateTime dateTime = QDateTime::fromString(raw, QStringLiteral("yyyy:MM:dd HH:mm:ss"));
+    if (!dateTime.isValid())
+        dateTime = QDateTime::fromString(raw, Qt::ISODate);
+    if (!dateTime.isValid())
+        return raw;
+    return QLocale::system().toString(dateTime, QLocale::ShortFormat);
+}
+
+QVCocoaFunctions::ImageMetadata QVCocoaFunctions::imageMetadata(const QString &filePath)
+{
+    ImageMetadata metadata;
+    if (filePath.isEmpty())
+        return metadata;
+
+    NSURL *url = [NSURL fileURLWithPath:filePath.toNSString()];
+    CGImageSourceRef source = CGImageSourceCreateWithURL((__bridge CFURLRef)url, nullptr);
+    if (!source)
+        return metadata;
+
+    CFDictionaryRef properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nullptr);
+    CFRelease(source);
+    if (!properties)
+        return metadata;
+
+    NSDictionary *props = (__bridge NSDictionary *)properties;
+    NSDictionary *exif = props[(id)kCGImagePropertyExifDictionary];
+    NSDictionary *tiff = props[(id)kCGImagePropertyTIFFDictionary];
+    NSDictionary *gps = props[(id)kCGImagePropertyGPSDictionary];
+
+    const QString takenRaw = cocoaObjectToString(exif[(id)kCGImagePropertyExifDateTimeOriginal]);
+    if (!takenRaw.isEmpty())
+        metadata.taken = formatExifDate(takenRaw);
+    else {
+        const QString tiffDate = cocoaObjectToString(tiff[(id)kCGImagePropertyTIFFDateTime]);
+        if (!tiffDate.isEmpty())
+            metadata.taken = formatExifDate(tiffDate);
+    }
+
+    const QString make = cocoaObjectToString(tiff[(id)kCGImagePropertyTIFFMake]).trimmed();
+    const QString model = cocoaObjectToString(tiff[(id)kCGImagePropertyTIFFModel]).trimmed();
+    if (!make.isEmpty() && !model.isEmpty()) {
+        metadata.camera = model.startsWith(make, Qt::CaseInsensitive) ? model
+                                                                      : (make + QLatin1Char(' ')
+                                                                         + model);
+    } else {
+        metadata.camera = !model.isEmpty() ? model : make;
+    }
+
+    const QString lens = cocoaObjectToString(exif[(id)kCGImagePropertyExifLensModel]).trimmed();
+    if (!lens.isEmpty() && !metadata.camera.contains(lens)) {
+        if (metadata.camera.isEmpty())
+            metadata.camera = lens;
+        else
+            metadata.camera += QStringLiteral(" · ") + lens;
+    }
+
+    QStringList exposureParts;
+    bool ok = false;
+    const double exposureTime = cocoaObjectToDouble(exif[(id)kCGImagePropertyExifExposureTime], &ok);
+    if (ok) {
+        const QString exposure = formatExposureTime(exposureTime);
+        if (!exposure.isEmpty())
+            exposureParts.append(exposure);
+    }
+    const double fNumber = cocoaObjectToDouble(exif[(id)kCGImagePropertyExifFNumber], &ok);
+    if (ok && fNumber > 0)
+        exposureParts.append(QStringLiteral("f/%1").arg(QString::number(fNumber, 'g', 3)));
+    id isoValue = exif[(id)kCGImagePropertyExifISOSpeedRatings];
+    if ([isoValue isKindOfClass:[NSArray class]] && [(NSArray *)isoValue count] > 0)
+        isoValue = [(NSArray *)isoValue firstObject];
+    const double iso = cocoaObjectToDouble(isoValue, &ok);
+    if (ok && iso > 0)
+        exposureParts.append(QStringLiteral("ISO %1").arg(qRound(iso)));
+    const double focalLength =
+            cocoaObjectToDouble(exif[(id)kCGImagePropertyExifFocalLength], &ok);
+    if (ok && focalLength > 0)
+        exposureParts.append(QStringLiteral("%1 mm").arg(QString::number(focalLength, 'g', 4)));
+    metadata.exposure = exposureParts.join(QStringLiteral(" · "));
+
+    if (gps) {
+        bool latOk = false;
+        bool lonOk = false;
+        double latitude = cocoaObjectToDouble(gps[(id)kCGImagePropertyGPSLatitude], &latOk);
+        double longitude = cocoaObjectToDouble(gps[(id)kCGImagePropertyGPSLongitude], &lonOk);
+        const QString latRef =
+                cocoaObjectToString(gps[(id)kCGImagePropertyGPSLatitudeRef]).toUpper();
+        const QString lonRef =
+                cocoaObjectToString(gps[(id)kCGImagePropertyGPSLongitudeRef]).toUpper();
+        if (latOk && lonOk) {
+            if (latRef == QLatin1String("S"))
+                latitude = -qAbs(latitude);
+            else if (latRef == QLatin1String("N"))
+                latitude = qAbs(latitude);
+            if (lonRef == QLatin1String("W"))
+                longitude = -qAbs(longitude);
+            else if (lonRef == QLatin1String("E"))
+                longitude = qAbs(longitude);
+
+            const QChar latHemisphere = latitude >= 0 ? QLatin1Char('N') : QLatin1Char('S');
+            const QChar lonHemisphere = longitude >= 0 ? QLatin1Char('E') : QLatin1Char('W');
+            metadata.gps = QStringLiteral("%1° %2, %3° %4")
+                                   .arg(qAbs(latitude), 0, 'f', 6)
+                                   .arg(latHemisphere)
+                                   .arg(qAbs(longitude), 0, 'f', 6)
+                                   .arg(lonHemisphere);
+
+            bool altOk = false;
+            const double altitude =
+                    cocoaObjectToDouble(gps[(id)kCGImagePropertyGPSAltitude], &altOk);
+            if (altOk) {
+                QString altRef = cocoaObjectToString(gps[(id)kCGImagePropertyGPSAltitudeRef]);
+                const double signedAltitude =
+                        (altRef == QLatin1String("1") || altRef == QLatin1String("true"))
+                        ? -altitude
+                        : altitude;
+                metadata.gps += QStringLiteral(" · %1 m").arg(QString::number(signedAltitude, 'f', 1));
+            }
+        }
+    }
+
+    CFRelease(properties);
+    return metadata;
 }
 
 QByteArray QVCocoaFunctions::getIccProfileForWindow(const QWindow *window)

@@ -1,6 +1,10 @@
 #include "qvinfodialog.h"
 #include "ui_qvinfodialog.h"
+#ifdef COCOA_LOADED
+#include "qvcocoafunctions.h"
+#endif
 #include <QDateTime>
+#include <QLabel>
 #include <QMimeDatabase>
 #include <QTimer>
 
@@ -17,6 +21,28 @@ QVInfoDialog::QVInfoDialog(QWidget *parent) : QDialog(parent), ui(new Ui::QVInfo
     width = 0;
     height = 0;
     frameCount = 0;
+
+    takenValue = new QLabel(this);
+    cameraValue = new QLabel(this);
+    exposureValue = new QLabel(this);
+    gpsValue = new QLabel(this);
+    const auto prepareValue = [](QLabel *label) {
+        label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        label->setCursor(Qt::IBeamCursor);
+        label->setWordWrap(true);
+    };
+    prepareValue(takenValue);
+    prepareValue(cameraValue);
+    prepareValue(exposureValue);
+    prepareValue(gpsValue);
+    ui->formLayout->addRow(tr("Taken:"), takenValue);
+    ui->formLayout->addRow(tr("Camera:"), cameraValue);
+    ui->formLayout->addRow(tr("Exposure:"), exposureValue);
+    ui->formLayout->addRow(tr("GPS:"), gpsValue);
+    takenKey = qobject_cast<QLabel *>(ui->formLayout->labelForField(takenValue));
+    cameraKey = qobject_cast<QLabel *>(ui->formLayout->labelForField(cameraValue));
+    exposureKey = qobject_cast<QLabel *>(ui->formLayout->labelForField(exposureValue));
+    gpsKey = qobject_cast<QLabel *>(ui->formLayout->labelForField(gpsValue));
 }
 
 QVInfoDialog::~QVInfoDialog()
@@ -76,6 +102,14 @@ QVFileInfoFields QVInfoDialog::buildFields(const QFileInfo &fileInfo, int width,
         fields.ratio = QString::number(width / gcd) + ":" + QString::number(height / gcd);
     if (frameCount != 0)
         fields.frames = QString::number(frameCount);
+#ifdef COCOA_LOADED
+    const QVCocoaFunctions::ImageMetadata metadata =
+            QVCocoaFunctions::imageMetadata(fileInfo.absoluteFilePath());
+    fields.taken = metadata.taken;
+    fields.camera = metadata.camera;
+    fields.exposure = metadata.exposure;
+    fields.gps = metadata.gps;
+#endif
     return fields;
 }
 
@@ -98,5 +132,18 @@ void QVInfoDialog::updateInfo()
         ui->framesLabel2->hide();
         ui->framesLabel->hide();
     }
+
+    const auto setOptional = [](QLabel *key, QLabel *value, const QString &text) {
+        const bool visible = !text.isEmpty();
+        if (key)
+            key->setVisible(visible);
+        value->setVisible(visible);
+        value->setText(text);
+        value->setToolTip(text);
+    };
+    setOptional(takenKey, takenValue, fields.taken);
+    setOptional(cameraKey, cameraValue, fields.camera);
+    setOptional(exposureKey, exposureValue, fields.exposure);
+    setOptional(gpsKey, gpsValue, fields.gps);
     window()->adjustSize();
 }

@@ -3,6 +3,7 @@
 
 #include <QDialog>
 #include <QFileInfo>
+#include <QLabel>
 #include <QLocale>
 #include <QString>
 
@@ -16,6 +17,10 @@ struct QVFileInfoFields
     QString dimensions;
     QString ratio;
     QString frames;
+    QString taken;
+    QString camera;
+    QString exposure;
+    QString gps;
 };
 
 namespace Ui {
@@ -45,6 +50,15 @@ private:
     int height;
 
     int frameCount;
+
+    QLabel *takenKey = nullptr;
+    QLabel *takenValue = nullptr;
+    QLabel *cameraKey = nullptr;
+    QLabel *cameraValue = nullptr;
+    QLabel *exposureKey = nullptr;
+    QLabel *exposureValue = nullptr;
+    QLabel *gpsKey = nullptr;
+    QLabel *gpsValue = nullptr;
 
 public:
     // If Qt 5.10 is available, the built-in function will be used--for Qt 5.9, a custom solution

@@ -3,8 +3,9 @@
 
 #include "openwith.h"
 
-#include <QWindow>
 #include <QMenu>
+#include <QString>
+#include <QWindow>
 
 class QWidget;
 
@@ -40,6 +41,16 @@ public:
     static QString deleteFile(const QString &filePath);
 
     static QByteArray getIccProfileForWindow(const QWindow *window);
+
+    struct ImageMetadata
+    {
+        QString taken;
+        QString camera;
+        QString exposure;
+        QString gps;
+    };
+
+    static ImageMetadata imageMetadata(const QString &filePath);
 };
 
 #endif // QVCOCOAFUNCTIONS_H
