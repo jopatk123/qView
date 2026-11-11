@@ -2214,8 +2214,8 @@ You can reenable them in the options dialog.</source>
         <translation>纸张方向</translation>
     </message>
     <message>
-        <source>Automatic (majority of the selected images)</source>
-        <translation>自动（按所选图片的多数方向）</translation>
+        <source>Adaptive (paper direction follows each image)</source>
+        <translation>自适应（每张图片按自身方向）</translation>
     </message>
     <message>
         <source>Portrait</source>
@@ -2234,8 +2234,8 @@ You can reenable them in the options dialog.</source>
         <translation>已选 %1 张：%2 张横向，%3 张纵向。</translation>
     </message>
     <message>
-        <source>Automatic picks one orientation for the whole job, so the remaining images are fitted with margins.</source>
-        <translation>自动模式会为整个任务选定一个方向，方向不同的图片会带留白缩放。</translation>
+        <source>Each image gets the paper direction that fits it, so nothing is fitted with margins.</source>
+        <translation>每张图片都会按自身方向单独设置纸张，因此不会产生留白。</translation>
     </message>
     <message>
         <source>Images of the other orientation are fitted with margins.</source>
@@ -2268,6 +2268,80 @@ You can reenable them in the options dialog.</source>
     <message>
         <source>Sent %1 of %2 images to the printer.</source>
         <translation>已向打印机发送 %1 / %2 张图片。</translation>
+    </message>
+    <message>
+        <source>%1 selected. From the first %2 files: %3 landscape, %4 portrait.</source>
+        <translation>已选 %1 张。按前 %2 个文件估算：%3 张横向，%4 张纵向。</translation>
+    </message>
+    <message>
+        <source>%1 could not be read.</source>
+        <translation>其中 %1 个文件无法读取。</translation>
+    </message>
+    <message>
+        <source>Save as PDF…</source>
+        <translation>另存为 PDF…</translation>
+    </message>
+    <message>
+        <source>Save as PDF</source>
+        <translation>另存为 PDF</translation>
+    </message>
+    <message>
+        <source>PDF Files (*.pdf)</source>
+        <translation>PDF 文件 (*.pdf)</translation>
+    </message>
+    <message>
+        <source>Could not create the PDF file.</source>
+        <translation>无法创建 PDF 文件。</translation>
+    </message>
+    <message>
+        <source>%1 pages will be printed, one image per page. Continue?</source>
+        <translation>将打印 %1 页，每页一张图片。要继续吗？</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>取消</translation>
+    </message>
+    <message>
+        <source>Cancelling…</source>
+        <translation>正在取消…</translation>
+    </message>
+    <message>
+        <source>Preparing…</source>
+        <translation>正在准备…</translation>
+    </message>
+    <message>
+        <source>Saving %1 of %2: %3</source>
+        <translation>正在保存 %1 / %2：%3</translation>
+    </message>
+    <message>
+        <source>Printing stopped after %1 of %2 images: the printer would not take another page. %3 images were not sent.</source>
+        <translation>打印在 %1 / %2 张后中断：打印机未能接受新的一页。还有 %3 张未发送。</translation>
+    </message>
+    <message>
+        <source>Cancelled after %1 of %2 images.</source>
+        <translation>已取消，共打印 %1 / %2 张。</translation>
+    </message>
+    <message>
+        <source>Wrote %1 of %2 images to %3.</source>
+        <translation>已将 %1 / %2 张图片写入 %3。</translation>
+    </message>
+    <message>
+        <source>%1 already exists. Do you want to replace it?</source>
+        <translation>%1 已存在，要替换它吗？</translation>
+    </message>
+    <message>
+        <source>Preview</source>
+        <translation>预览</translation>
+    </message>
+    <message>
+        <source>Select an image to see the page.</source>
+        <translation>选择一张图片以查看页面效果。</translation>
+    </message>
+    <message>
+        <source>Paper: %1
+Image: %2 × %3</source>
+        <translation>纸张：%1
+图片：%2 × %3</translation>
     </message>
     <message>
         <source>These files could not be printed:

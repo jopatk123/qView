@@ -16,6 +16,11 @@ class QVCheckListDelegate : public QStyledItemDelegate
 public:
     explicit QVCheckListDelegate(QObject *parent = nullptr) : QStyledItemDelegate(parent) {}
 
+    // Off by default: clicking a row usually means "select this item" (the batch
+    // compress dialog uses it to drive its preview). Lists where a click has no
+    // other meaning turn it on so the whole row toggles the box.
+    void setToggleOnRowClick(bool enabled) { rowClickToggles = enabled; }
+
     void paint(QPainter *painter, const QStyleOptionViewItem &option,
                const QModelIndex &index) const override
     {
@@ -82,7 +87,7 @@ public:
 #else
                 const QPoint pos = mouse->pos();
 #endif
-                if (indicatorRect(opt).contains(pos)) {
+                if ((rowClickToggles ? option.rect : indicatorRect(opt)).contains(pos)) {
                     const auto state =
                             static_cast<Qt::CheckState>(index.data(Qt::CheckStateRole).toInt());
                     model->setData(index, state == Qt::Checked ? Qt::Unchecked : Qt::Checked,
@@ -96,6 +101,8 @@ public:
     }
 
 private:
+    bool rowClickToggles = false;
+
     static QRect indicatorRect(const QStyleOptionViewItem &option)
     {
         const QWidget *widget = option.widget;
