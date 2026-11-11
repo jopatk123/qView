@@ -105,6 +105,10 @@ signals:
     void fillSelectionReady(const QRect &imageRect);
 
 protected:
+    // Outlines the image while a selection tool is armed, so its real edges are
+    // visible against the window background.
+    void drawForeground(QPainter *painter, const QRectF &rect) override;
+
     void wheelEvent(QWheelEvent *event) override;
 
     void resizeEvent(QResizeEvent *event) override;

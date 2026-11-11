@@ -5,6 +5,7 @@
 #include "settingsmanager.h"
 #include <QWheelEvent>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QDebug>
 #include <QApplication>
 #include <QGraphicsPixmapItem>
@@ -935,10 +936,59 @@ void QVGraphicsView::clearSelectDrag()
         selectRubberBand->hide();
 }
 
+void QVGraphicsView::drawForeground(QPainter *painter, const QRectF &rect)
+{
+    QGraphicsView::drawForeground(painter, rect);
+
+    if (selectMode == SelectMode::None || !getCurrentFileDetails().isPixmapLoaded)
+        return;
+
+    // Viewport coordinates are what the user actually sees, and they are stable
+    // regardless of the zoom transform the painter arrived with.
+    const QRectF imageRect = mapFromScene(loadedPixmapItem->sceneBoundingRect()).boundingRect();
+    if (imageRect.width() < 8 || imageRect.height() < 8)
+        return;
+
+    // Fitting the image to the window lets it spill a couple of pixels past the
+    // viewport (see MARGIN in fitInViewMarginless), and zoomed-in images spill
+    // far more. Clamping keeps the outline visible wherever part of the image is
+    // on screen instead of drawing it off-canvas.
+    const QRectF outline = imageRect.intersected(QRectF(viewport()->rect()).adjusted(2, 2, -2, -2));
+    if (outline.width() < 4 || outline.height() < 4)
+        return;
+
+    painter->save();
+    painter->resetTransform();
+    painter->setRenderHint(QPainter::Antialiasing, false);
+
+    // Alternating black / white segments. A black-only frame disappears on a dark
+    // window background, a white-only one on a white image; alternating segments
+    // keep at least half of every edge visible on any background.
+    const qreal thickness = 2;
+    const qreal segment = 6;
+    const auto drawRun = [&](qreal x, qreal y, qreal length, bool horizontal) {
+        int index = 0;
+        for (qreal offset = 0; offset < length; offset += segment, ++index) {
+            const qreal span = qMin(segment, length - offset);
+            const QRectF piece = horizontal ? QRectF(x + offset, y, span, thickness)
+                                            : QRectF(x, y + offset, thickness, span);
+            painter->fillRect(piece, index % 2 ? Qt::white : Qt::black);
+        }
+    };
+
+    drawRun(outline.left(), outline.top(), outline.width(), true);
+    drawRun(outline.left(), outline.bottom() - thickness, outline.width(), true);
+    drawRun(outline.left(), outline.top(), outline.height(), false);
+    drawRun(outline.right() - thickness, outline.top(), outline.height(), false);
+
+    painter->restore();
+}
+
 void QVGraphicsView::setSelectMode(SelectMode mode)
 {
     if (selectMode == mode) {
         clearSelectDrag();
+        viewport()->update();
         if (mode != SelectMode::None) {
             setDragMode(QGraphicsView::NoDrag);
             viewport()->setCursor(Qt::CrossCursor);
@@ -950,6 +1000,7 @@ void QVGraphicsView::setSelectMode(SelectMode mode)
     const SelectMode previous = selectMode;
     clearSelectDrag();
     selectMode = mode;
+    viewport()->update();
 
     if (previous == SelectMode::Crop)
         emit cropModeChanged(false);
