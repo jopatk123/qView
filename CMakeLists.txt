@@ -226,6 +226,25 @@ elseif(APPLE)
     set_target_properties(${PROJECT_NAME} PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/Info.plist"
     )
+
+    # If macdeployqt ever ran against the build tree, it leaves Frameworks,
+    # PlugIns and a Resources/qt.conf behind. A development build links against
+    # the system Qt, so that stale qt.conf redirects plugin lookup into the
+    # bundled PlugIns, whose plugins in turn pull in the bundled Qt. Two Qt
+    # copies in one process make the cocoa plugin fail to initialize and the
+    # app aborts in QApplication's constructor with "no Qt platform plugin
+    # could be initialized". Strip the artifacts after every relink to keep the
+    # development bundle directly runnable. Distribution builds belong in a
+    # separate directory (see dist/scripts/macdeploy.sh).
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E remove_directory
+            "$<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Frameworks"
+            "$<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/PlugIns"
+        COMMAND ${CMAKE_COMMAND} -E remove
+            "$<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/qt.conf"
+        COMMENT "Stripping stale deployment artifacts from the development bundle"
+        VERBATIM
+    )
 elseif(UNIX AND NOT APPLE)
     if(NOT NO_X11)
         find_package(X11 REQUIRED)
