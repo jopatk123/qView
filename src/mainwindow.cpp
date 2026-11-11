@@ -6,6 +6,8 @@
 #include "qvthumbnailbar.h"
 #include "qvfileinfopanel.h"
 #include "qvbatchcompressdialog.h"
+#include "qvbatchprintdialog.h"
+#include "qvprintpage.h"
 #include "qvcaf_qt.h"
 #include "qvcaf.h"
 
@@ -110,21 +112,7 @@ QImage outputImageFrom(const QVGraphicsView *view)
     return image;
 }
 
-void drawImageOnPage(QPainter &painter, const QRectF &pageRect, const QImage &image)
-{
-    painter.fillRect(pageRect, Qt::white);
-    if (image.isNull() || pageRect.isEmpty())
-        return;
-
-    painter.setRenderHint(QPainter::SmoothPixmapTransform);
-    QSizeF targetSize(image.size());
-    targetSize.scale(pageRect.size(), Qt::KeepAspectRatio);
-
-    const QRectF targetRect(pageRect.x() + (pageRect.width() - targetSize.width()) / 2.0,
-                            pageRect.y() + (pageRect.height() - targetSize.height()) / 2.0,
-                            targetSize.width(), targetSize.height());
-    painter.drawImage(targetRect, image);
-}
+// drawImageOnPage lives in qvprintpage.h so the batch print dialog can reuse it.
 
 // Icons sit in the strip under the macOS titlebar. Empty space there still drags the window.
 class ImageToolbar : public QWidget
@@ -1352,6 +1340,28 @@ void MainWindow::printImage()
     painter.end();
 }
 
+void MainWindow::batchPrint()
+{
+    const QVImageCore::FileDetails &details = getCurrentFileDetails();
+
+    QStringList files;
+    files.reserve(details.folderFileInfoList.size());
+    for (const QVImageCore::CompatibleFile &file : details.folderFileInfoList)
+        files.append(file.absoluteFilePath);
+
+    if (files.isEmpty()) {
+        QMessageBox::information(this, tr("Batch print"),
+                                 tr("There are no images to print in this folder."));
+        return;
+    }
+
+    // The current file goes in as the live pixmap so unsaved edits (crop,
+    // content aware fill, rotate) print the way they look on screen.
+    QVBatchPrintDialog dialog(files, details.fileInfo.absoluteFilePath(),
+                              outputImageFrom(graphicsView), this);
+    dialog.exec();
+}
+
 void MainWindow::exportPdf()
 {
     const QImage image = outputImageFrom(graphicsView);
@@ -2157,6 +2167,11 @@ void MainWindow::setupImageToolbar()
     fileInfoButton = addButton(actionToolTip(QStringLiteral("togglefileinfopanel")), true);
     trashButton = addButton(actionToolTip(QStringLiteral("delete")), false);
     printButton = addButton(tr("Print"), false);
+    auto *printMenu = new QMenu(printButton);
+    printCurrentAction = printMenu->addAction(tr("Print this image"));
+    auto *batchPrintAction = printMenu->addAction(tr("Batch print…"));
+    printButton->setMenu(printMenu);
+    printButton->setPopupMode(QToolButton::MenuButtonPopup);
     pdfButton = addButton(tr("Save as PDF…"), false);
     toolbarLayout->addStretch(1);
 
@@ -2182,6 +2197,8 @@ void MainWindow::setupImageToolbar()
     connect(fileInfoButton, &QToolButton::clicked, this, &MainWindow::toggleFileInfoPanelVisible);
     connect(trashButton, &QToolButton::clicked, this, [this]() { askDeleteFile(false, true); });
     connect(printButton, &QToolButton::clicked, this, &MainWindow::printImage);
+    connect(printCurrentAction, &QAction::triggered, this, &MainWindow::printImage);
+    connect(batchPrintAction, &QAction::triggered, this, &MainWindow::batchPrint);
     connect(pdfButton, &QToolButton::clicked, this, &MainWindow::exportPdf);
 
     imageToolbar->setStyleSheet(QStringLiteral(
@@ -2240,6 +2257,8 @@ void MainWindow::updateImageToolbar()
     rotateRightButton->setEnabled(hasImage);
     trashButton->setEnabled(hasImage);
     printButton->setEnabled(hasImage);
+    if (printCurrentAction)
+        printCurrentAction->setEnabled(hasImage);
     pdfButton->setEnabled(hasImage);
     cropButton->setEnabled(canEdit && !cafRunning);
     cafButton->setEnabled(canEdit && !cafRunning);

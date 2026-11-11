@@ -57,6 +57,7 @@ set(PROJECT_SOURCES
     src/qvaboutdialog.cpp
     src/qvrenamedialog.cpp
     src/qvbatchcompressdialog.cpp
+    src/qvbatchprintdialog.cpp
     src/qvcompress.cpp
     src/qvwelcomedialog.cpp
     src/qvinfodialog.cpp
@@ -81,6 +82,9 @@ set(PROJECT_HEADERS
     src/qvaboutdialog.h
     src/qvrenamedialog.h
     src/qvbatchcompressdialog.h
+    src/qvbatchprintdialog.h
+    src/qvchecklistdelegate.h
+    src/qvprintpage.h
     src/qvcompress.h
     src/qvwelcomedialog.h
     src/qvinfodialog.h

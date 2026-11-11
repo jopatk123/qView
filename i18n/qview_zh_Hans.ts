@@ -613,6 +613,22 @@ No write permission or file is read-only.</source>
         <translation>批量压缩…</translation>
     </message>
     <message>
+        <source>Print this image</source>
+        <translation>打印这张图片</translation>
+    </message>
+    <message>
+        <source>Batch print…</source>
+        <translation>批量打印…</translation>
+    </message>
+    <message>
+        <source>Batch print</source>
+        <translation>批量打印</translation>
+    </message>
+    <message>
+        <source>There are no images to print in this folder.</source>
+        <translation>这个文件夹里没有可打印的图片。</translation>
+    </message>
+    <message>
         <source>Print</source>
         <translation>打印</translation>
     </message>
@@ -2161,6 +2177,107 @@ You can reenable them in the options dialog.</source>
     <message>
         <source>%1 → %2, increased %3 (%4%%)</source>
         <translation>%1 → %2，增加 %3（%4%%）</translation>
+    </message>
+</context>
+<context>
+    <name>QVBatchPrintDialog</name>
+    <message>
+        <source>Batch print</source>
+        <translation>批量打印</translation>
+    </message>
+    <message>
+        <source>Files</source>
+        <translation>文件</translation>
+    </message>
+    <message>
+        <source>Add files…</source>
+        <translation>添加文件…</translation>
+    </message>
+    <message>
+        <source>Add files</source>
+        <translation>添加文件</translation>
+    </message>
+    <message>
+        <source>All</source>
+        <translation>全选</translation>
+    </message>
+    <message>
+        <source>None</source>
+        <translation>全不选</translation>
+    </message>
+    <message>
+        <source>One image per page, fitted to the paper and centered. Files that cannot be read are skipped.</source>
+        <translation>每页一张图片，按纸张等比缩放并居中。无法读取的文件会被跳过。</translation>
+    </message>
+    <message>
+        <source>Orientation</source>
+        <translation>纸张方向</translation>
+    </message>
+    <message>
+        <source>Automatic (majority of the selected images)</source>
+        <translation>自动（按所选图片的多数方向）</translation>
+    </message>
+    <message>
+        <source>Portrait</source>
+        <translation>纵向</translation>
+    </message>
+    <message>
+        <source>Landscape</source>
+        <translation>横向</translation>
+    </message>
+    <message>
+        <source>%1 of %2 selected</source>
+        <translation>已选 %1 / %2</translation>
+    </message>
+    <message>
+        <source>%1 selected: %2 landscape, %3 portrait.</source>
+        <translation>已选 %1 张：%2 张横向，%3 张纵向。</translation>
+    </message>
+    <message>
+        <source>Automatic picks one orientation for the whole job, so the remaining images are fitted with margins.</source>
+        <translation>自动模式会为整个任务选定一个方向，方向不同的图片会带留白缩放。</translation>
+    </message>
+    <message>
+        <source>Images of the other orientation are fitted with margins.</source>
+        <translation>方向与纸张不同的图片会带留白缩放。</translation>
+    </message>
+    <message>
+        <source>Print…</source>
+        <translation>打印…</translation>
+    </message>
+    <message>
+        <source>Print</source>
+        <translation>打印</translation>
+    </message>
+    <message>
+        <source>Select at least one image.</source>
+        <translation>请至少选择一张图片。</translation>
+    </message>
+    <message>
+        <source>Could not start printing.</source>
+        <translation>无法开始打印。</translation>
+    </message>
+    <message>
+        <source>Printing %1 of %2: %3</source>
+        <translation>正在打印 %1 / %2：%3</translation>
+    </message>
+    <message>
+        <source>Nothing was printed.</source>
+        <translation>没有打印任何内容。</translation>
+    </message>
+    <message>
+        <source>Sent %1 of %2 images to the printer.</source>
+        <translation>已向打印机发送 %1 / %2 张图片。</translation>
+    </message>
+    <message>
+        <source>These files could not be printed:
+%1</source>
+        <translation>以下文件无法打印：
+%1</translation>
+    </message>
+    <message>
+        <source>…and %1 more</source>
+        <translation>…以及另外 %1 个</translation>
     </message>
 </context>
 </TS>

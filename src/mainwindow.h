@@ -109,6 +109,8 @@ public:
 
     void printImage();
 
+    void batchPrint();
+
     void exportPdf();
 
     void revertImage();
@@ -220,6 +222,7 @@ private:
     QToolButton *fileInfoButton = nullptr;
     QToolButton *trashButton = nullptr;
     QToolButton *printButton = nullptr;
+    QAction *printCurrentAction = nullptr;
     QToolButton *pdfButton = nullptr;
     QHBoxLayout *imageRowLayout = nullptr;
     int appliedThumbnailPosition = 0;
