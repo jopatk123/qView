@@ -603,10 +603,9 @@ void MainWindow::disableActions()
 
 void MainWindow::requestPopulateOpenWithMenu()
 {
-    openWithFutureWatcher.setFuture(QtConcurrent::run([&] {
-        const auto &curFilePath = getCurrentFileDetails().fileInfo.absoluteFilePath();
-        return OpenWith::getOpenWithItems(curFilePath);
-    }));
+    const QString curFilePath = getCurrentFileDetails().fileInfo.absoluteFilePath();
+    openWithFutureWatcher.setFuture(QtConcurrent::run(
+            [curFilePath] { return OpenWith::getOpenWithItems(curFilePath); }));
 }
 
 void MainWindow::populateOpenWithMenu(const QList<OpenWith::OpenWithItem> openWithItems)
@@ -1897,6 +1896,11 @@ void MainWindow::nextFile()
 void MainWindow::lastFile()
 {
     graphicsView->goToFile(QVGraphicsView::GoToFileMode::last);
+}
+
+void MainWindow::randomFile()
+{
+    graphicsView->goToFile(QVGraphicsView::GoToFileMode::random);
 }
 
 void MainWindow::saveFrameAs()

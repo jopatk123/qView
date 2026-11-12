@@ -3,8 +3,9 @@
 #include "qvwin32functions.h"
 
 #include <QCommandLineParser>
-#include <QTimer>
 #include <QCoreApplication>
+#include <QThreadPool>
+#include <QTimer>
 #include <cstdlib>
 
 int main(int argc, char *argv[])
@@ -51,6 +52,8 @@ int main(int argc, char *argv[])
             QCoreApplication::exit(*exitCode);
         });
         const int rc = QApplication::exec();
+        // Background tasks create QPixmaps; they must finish while the application object still exists.
+        QThreadPool::globalInstance()->waitForDone();
         const int out = *exitCode;
         delete exitCode;
         return out != 0 ? out : rc;
@@ -59,5 +62,8 @@ int main(int argc, char *argv[])
     if (!parser.positionalArguments().isEmpty())
         QVApplication::openFile(window, parser.positionalArguments().constFirst(), true);
 
-    return QApplication::exec();
+    const int ret = QApplication::exec();
+    // Background tasks create QPixmaps; they must finish while the application object still exists.
+    QThreadPool::globalInstance()->waitForDone();
+    return ret;
 }

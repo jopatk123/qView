@@ -191,6 +191,7 @@ private:
     static QCache<QString, ReadData> imageCache;
 
     DirInfo lastDirInfo;
+    unsigned randomSortSeed = 0;
 
     QStringList lastFilesPreloaded;
     QStringList preloadFilesInProgress;
