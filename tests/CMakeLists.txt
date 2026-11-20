@@ -18,6 +18,7 @@ set(TEST_SOURCES
     ../src/qvcompress.cpp
     ../src/qvwelcomedialog.cpp
     ../src/qvinfodialog.cpp
+    ../src/qvimagemetadata.cpp
     ../src/qvfileinfopanel.cpp
     ../src/qvimagecore.cpp
     ../src/qvshortcutdialog.cpp

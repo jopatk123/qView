@@ -1,8 +1,6 @@
 #include "qvinfodialog.h"
+#include "qvimagemetadata.h"
 #include "ui_qvinfodialog.h"
-#ifdef COCOA_LOADED
-#include "qvcocoafunctions.h"
-#endif
 #include <QDateTime>
 #include <QLabel>
 #include <QMimeDatabase>
@@ -102,14 +100,11 @@ QVFileInfoFields QVInfoDialog::buildFields(const QFileInfo &fileInfo, int width,
         fields.ratio = QString::number(width / gcd) + ":" + QString::number(height / gcd);
     if (frameCount != 0)
         fields.frames = QString::number(frameCount);
-#ifdef COCOA_LOADED
-    const QVCocoaFunctions::ImageMetadata metadata =
-            QVCocoaFunctions::imageMetadata(fileInfo.absoluteFilePath());
+    const QVImageMetadata::Fields metadata = QVImageMetadata::read(fileInfo.absoluteFilePath());
     fields.taken = metadata.taken;
     fields.camera = metadata.camera;
     fields.exposure = metadata.exposure;
     fields.gps = metadata.gps;
-#endif
     return fields;
 }
 

@@ -61,6 +61,7 @@ set(PROJECT_SOURCES
     src/qvcompress.cpp
     src/qvwelcomedialog.cpp
     src/qvinfodialog.cpp
+    src/qvimagemetadata.cpp
     src/qvfileinfopanel.cpp
     src/qvimagecore.cpp
     src/qvshortcutdialog.cpp
@@ -88,6 +89,7 @@ set(PROJECT_HEADERS
     src/qvcompress.h
     src/qvwelcomedialog.h
     src/qvinfodialog.h
+    src/qvimagemetadata.h
     src/qvfileinfopanel.h
     src/qvimagecore.h
     src/qvshortcutdialog.h
